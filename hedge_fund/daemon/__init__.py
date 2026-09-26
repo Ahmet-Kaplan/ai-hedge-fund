@@ -33,8 +33,6 @@ from pathlib import Path
 from typing import Callable, Literal, Mapping
 
 from hedge_fund.backtesting.fund import rebalance_grid
-from hedge_fund.brokers.paper import PaperBroker
-from hedge_fund.brokers.sim import SimBroker
 from hedge_fund.data.protocol import DataClient
 from hedge_fund.fund.spec import Fund, normalize_universe
 from hedge_fund.ledger import (
@@ -43,17 +41,19 @@ from hedge_fund.ledger import (
     load_cycle_record,
     save_cycle_record,
 )
-from hedge_fund.paths import KILL_SWITCH_PATH, TICKS_DIR
+from hedge_fund.journal import FileOrderJournal, JournalledBroker
+from hedge_fund.paths import journal_path, KILL_SWITCH_PATH, TICKS_DIR
 from hedge_fund.pipeline.models import CycleRecord
 from hedge_fund.pipeline.run_cycle import run_cycle
+from hedge_fund.venue import OpenVenue, open_venue
 
-VENUES = ("paper", "sim")
+VENUES = ("paper", "sim", "alpaca")
 KILL_SWITCH_ENV = "HEDGE_FUND_KILL_SWITCH"
 DEFAULT_INTERVAL_SECONDS = 60.0
 DEFAULT_LOOKBACK_DAYS = 40
 
 TickStatus = Literal["ran", "skipped", "halted", "not_due"]
-VenueName = Literal["paper", "sim"]
+VenueName = Literal["paper", "sim", "alpaca"]
 
 
 @dataclass(frozen=True)
@@ -85,8 +85,7 @@ class ScheduleConfig:
             )
         if self.venue not in VENUES:
             raise ValueError(
-                f"daemon venue must be paper or sim, not {self.venue!r} — "
-                "this milestone has no live venue"
+                f"daemon venue must be one of {', '.join(VENUES)}, not {self.venue!r}"
             )
         if self.lookback_days < 1:
             raise ValueError(
@@ -205,20 +204,14 @@ def broker_for_venue(
     fund_name: str,
     capital: float,
     directory: Path,
-) -> tuple[PaperBroker | SimBroker, CycleRecord | None]:
-    """Open a paper or sim book, seeded from the newest receipt when one exists."""
-    if venue not in VENUES:
-        raise ValueError(
-            f"daemon venue must be paper or sim, not {venue!r} — "
-            "this milestone has no live venue"
-        )
-    if venue == "paper":
-        return broker_for_run(fund_name, capital, directory)
-    path = latest_run_receipt(fund_name, directory)
-    if path is None:
-        return SimBroker(cash=capital), None
-    record = load_cycle_record(path, expected_fund=fund_name)
-    return SimBroker(cash=record.cash, positions=record.positions), record
+) -> OpenVenue:
+    """Open the daemon's book, seeded from the newest receipt when one exists.
+
+    Thin wrapper over the shared venue registry so the daemon and the CLI open
+    books the same way — including `alpaca`, whose paper/live/confirmation
+    gates live in `AlpacaSettings`, not here.
+    """
+    return open_venue(venue, fund_name=fund_name, capital=capital, receipts=directory)
 
 
 def already_completed(
@@ -266,8 +259,7 @@ def evaluate_tick(
     """
     if venue not in VENUES:
         raise ValueError(
-            f"daemon venue must be paper or sim, not {venue!r} — "
-            "this milestone has no live venue"
+            f"daemon venue must be one of {', '.join(VENUES)}, not {venue!r}"
         )
     universe = normalize_universe(universe)
     spec = fund.spec
@@ -315,8 +307,28 @@ def evaluate_tick(
             venue=venue,
         )
 
-    broker, _prior = broker_for_venue(venue, spec.name, spec.capital, receipts)
-    record = run_cycle(fund, session, broker, data_client, universe)
+    try:
+        opened = broker_for_venue(venue, spec.name, spec.capital, receipts)
+    except ValueError as exc:
+        # A venue that cannot be opened at all is a halt, not a crash: the
+        # loop keeps its schedule and the next tick reports the same thing.
+        return TickResult(status="halted", reason=str(exc), key=key,
+                          session_date=session, venue=venue)
+    if venue == "alpaca" and not opened.trading_enabled:
+        return TickResult(
+            status="halted",
+            reason=f"alpaca venue is read-only: {opened.note}",
+            key=key, session_date=session, venue=opened.label,
+        )
+
+    # The daemon is the always-on path, so the order journal matters most
+    # here, and the session is known exactly (unlike a one-shot CLI run).
+    broker = JournalledBroker(
+        opened.broker, FileOrderJournal(journal_path(spec.name)),
+        fund=spec.name, session=session,
+    )
+    record = run_cycle(fund, session, broker, data_client, universe,
+                       reference=opened.reference)
     save_cycle_record(record, receipts)
     store.remember(key)
     return TickResult(

@@ -5,7 +5,8 @@ Usage::
     python -m hedge_fund.daemon ~/.hedge-fund/mandates/example.yaml --tickers AAPL,MSFT
         Poll on --interval (default 60s). Each evaluation uses the market
         calendar and the mandate's rebalance cadence. Paper venue is the
-        default; --venue sim is the other allowed book. A kill-switch file
+        default; --venue sim is the deterministic offline book, and
+        --venue alpaca runs against the real account. A kill-switch file
         or HEDGE_FUND_KILL_SWITCH stops new ticks.
 
     python -m hedge_fund.daemon ~/.hedge-fund/mandates/example.yaml --tickers AAPL,MSFT --once
@@ -18,7 +19,13 @@ Usage::
         flags override the file.
 
 A mandate is the desk and never names tickers; --tickers says what to
-point it at. Live venues are rejected.
+point it at.
+
+The alpaca venue is gated exactly as the CLI is: ALPACA_TRADING_ENABLED
+must be set before an order goes out, and a live account additionally
+needs ALPACA_LIVE_TRADING_CONFIRMED. Until then a tick halts with a
+read-only reason rather than failing mid-cycle, so the loop keeps its
+schedule and says why.
 """
 
 from __future__ import annotations
@@ -110,7 +117,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m hedge_fund.daemon",
         description="Always-on scheduler: run_cycle on the market calendar "
-        "with idempotent ticks and a kill-switch. Paper or sim venue only.",
+        "with idempotent ticks and a kill-switch. Paper, sim, or Alpaca.",
     )
     parser.add_argument(
         "mandate",
@@ -139,7 +146,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--venue",
         choices=VENUES,
-        help="paper (default, live clock, no live venue) or sim",
+        help=f"which book to run against (default: paper). One of: {', '.join(VENUES)}. "
+        "alpaca needs ALPACA_TRADING_ENABLED=1 before it will place orders",
     )
     parser.add_argument(
         "--config",

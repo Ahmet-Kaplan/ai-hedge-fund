@@ -19,6 +19,7 @@ from pydantic import ValidationError
 
 from hedge_fund.brokers.paper import PaperBroker
 from hedge_fund.pipeline.models import CycleRecord
+from hedge_fund.reconciliation import LedgerReference
 
 
 def run_receipt_paths(fund_name: str, directory: Path) -> list[Path]:
@@ -84,6 +85,18 @@ def save_cycle_record(record: CycleRecord, directory: Path) -> Path:
     path = directory / f"{record.fund}-run-{stamp}.json"
     path.write_text(record.model_dump_json(indent=2))
     return path
+
+
+def latest_reference(fund_name: str, directory: Path) -> LedgerReference | None:
+    """The newest receipt's ending book, as a reconciliation reference.
+
+    Distinct from `broker_for_run`, which *seeds* a paper book: a live venue
+    must not be seeded from a file, only reconciled against one.
+    """
+    path = latest_run_receipt(fund_name, directory)
+    if path is None:
+        return None
+    return LedgerReference.from_cycle_record(load_cycle_record(path, expected_fund=fund_name))
 
 
 def broker_for_run(

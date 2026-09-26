@@ -126,6 +126,19 @@ broker = AlpacaBroker(AlpacaSettings.from_env())   # reads only, by default
 record = run_cycle(fund, as_of, broker, data_client, universe)
 ```
 
+The same book is reachable from the CLI and the daemon:
+
+```bash
+aihf ~/.hedge-fund/mandates/example.yaml --tickers AAPL,MSFT --broker sim
+aihf ~/.hedge-fund/mandates/example.yaml --tickers AAPL,MSFT --broker alpaca
+python -m hedge_fund.daemon ~/.hedge-fund/mandates/example.yaml --tickers AAPL,MSFT --venue alpaca
+```
+
+With `--broker alpaca` the run reconciles the venue against the newest receipt
+before it sizes anything, refuses to trade if the venue is still holding an
+order, and journals every submission. Until trading is enabled it stops with a
+read-only message rather than failing on the first order mid-cycle.
+
 Order submission is gated three times over, so a half-remembered environment
 variable cannot move real money:
 

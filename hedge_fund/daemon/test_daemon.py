@@ -341,28 +341,29 @@ def test_evaluate_then_halt_in_loop_never_sleeps_the_interval(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_paper_venue_opens_paper_broker(tmp_path):
-    broker, prior = broker_for_venue("paper", "desk", 50_000.0, tmp_path)
-    assert isinstance(broker, PaperBroker)
-    assert broker.venue == "paper"
-    assert prior is None
-    assert broker.cash() == pytest.approx(50_000.0)
+    opened = broker_for_venue("paper", "desk", 50_000.0, tmp_path)
+    assert isinstance(opened.broker, PaperBroker)
+    assert opened.label == "paper"
+    assert opened.reference is None
+    assert not opened.live
+    assert opened.broker.cash() == pytest.approx(50_000.0)
 
 
 def test_sim_venue_opens_sim_broker(tmp_path):
-    broker, prior = broker_for_venue("sim", "desk", 75_000.0, tmp_path)
-    assert isinstance(broker, SimBroker)
-    assert broker.venue == "sim"
-    assert prior is None
-    assert broker.cash() == pytest.approx(75_000.0)
+    opened = broker_for_venue("sim", "desk", 75_000.0, tmp_path)
+    assert isinstance(opened.broker, SimBroker)
+    assert opened.label == "sim"
+    assert opened.reference is None
+    assert opened.broker.cash() == pytest.approx(75_000.0)
 
 
-def test_live_venue_is_rejected(tmp_path):
-    with pytest.raises(ValueError, match="paper or sim"):
+def test_unknown_venue_is_rejected(tmp_path):
+    with pytest.raises(ValueError, match="unknown venue"):
         broker_for_venue("live", "desk", 100_000.0, tmp_path)
-    with pytest.raises(ValueError, match="paper or sim"):
+    with pytest.raises(ValueError, match="daemon venue must be one of"):
         ScheduleConfig(venue="ibkr")
     fund, _ = _fund()
-    with pytest.raises(ValueError, match="paper or sim"):
+    with pytest.raises(ValueError, match="daemon venue must be one of"):
         evaluate_tick(
             fund, ["AAPL"], as_of="2024-06-03",
             data_client=FakeDataClient(closes={"AAPL": 200.0, "SPY": 100.0}),
@@ -370,6 +371,46 @@ def test_live_venue_is_rejected(tmp_path):
             kill_switch=KillSwitch(tmp_path / "KILL", environ={}),
             venue="live", trading_days=_days("2024-06-03"),
         )
+
+
+def test_alpaca_venue_without_keys_halts_instead_of_crashing(tmp_path, monkeypatch):
+    """An unopenable venue is a halt: the loop keeps its schedule."""
+    for var in ("ALPACA_API_KEY", "ALPACA_SECRET_KEY", "ALPACA_API_SECRET",
+                "APCA_API_KEY_ID", "APCA_API_SECRET_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    fund, _ = _fund()
+    result = evaluate_tick(
+        fund, ["AAPL"], as_of="2024-06-03",
+        data_client=FakeDataClient(closes={"AAPL": 200.0, "SPY": 100.0}),
+        receipts=tmp_path, store=_store(tmp_path),
+        kill_switch=KillSwitch(tmp_path / "KILL", environ={}),
+        venue="alpaca", trading_days=_days("2024-06-03"),
+    )
+    assert result.status == "halted"
+    assert "ALPACA_API_KEY" in result.reason
+
+
+def test_alpaca_venue_is_read_only_until_enabled(tmp_path, monkeypatch):
+    """Keys present but trading off: the tick halts rather than failing mid-cycle."""
+    monkeypatch.setenv("ALPACA_API_KEY", "k")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "s")
+    monkeypatch.delenv("ALPACA_TRADING_ENABLED", raising=False)
+    # Never construct a real client for a halt test.
+    import hedge_fund.venue as venue_module
+    monkeypatch.setattr(
+        venue_module, "AlpacaBroker",
+        lambda settings: SimBroker(cash=1.0),
+    )
+    fund, _ = _fund()
+    result = evaluate_tick(
+        fund, ["AAPL"], as_of="2024-06-03",
+        data_client=FakeDataClient(closes={"AAPL": 200.0, "SPY": 100.0}),
+        receipts=tmp_path, store=_store(tmp_path),
+        kill_switch=KillSwitch(tmp_path / "KILL", environ={}),
+        venue="alpaca", trading_days=_days("2024-06-03"),
+    )
+    assert result.status == "halted"
+    assert "read-only" in result.reason
 
 
 def test_weekly_midweek_is_not_due(tmp_path):

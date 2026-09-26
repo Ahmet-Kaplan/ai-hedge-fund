@@ -41,7 +41,7 @@ def test_cli_rejects_invalid_configuration_before_clients(tmp_path, monkeypatch,
     monkeypatch.setattr(run, "ensure_mandates_dir", lambda: tmp_path)
     monkeypatch.setattr(run, "Fund", forbidden)
     monkeypatch.setattr(run, "FDClient", forbidden)
-    monkeypatch.setattr(run, "broker_for_run", forbidden)
+    monkeypatch.setattr(run, "open_venue", forbidden)
     monkeypatch.setattr(sys, "argv", ["aihf", str(path), "--tickers", "AAPL"] + (["--backtest"] if backtest else []))
     with pytest.raises(SystemExit) as exc:
         run.main()
@@ -195,8 +195,8 @@ def test_paper_flag_writes_receipt_and_next_run_seeds(tmp_path, monkeypatch, cap
     run.main()
     second = CycleRecord.model_validate_json(output.read_text())
     err = capsys.readouterr().err
-    assert "carrying book from 2024-06-03" in err
-    assert "paper venue" in err
+    assert "ledger expects paper-desk" in err
+    assert "venue: paper" in err
     assert second.cash_before == pytest.approx(first.cash)
     assert second.equity_before == pytest.approx(first.nav)
     assert second.positions == first.positions
@@ -209,14 +209,14 @@ def test_default_live_clock_path_is_paper(tmp_path, monkeypatch, capsys):
     """One cycle without --backtest is the paper path (live clock + PaperBroker)."""
     run = _patch_cli(monkeypatch, tmp_path, {"AAPL": 200.0, "SPY": 100.0})
     seen: list[object] = []
-    real = run.broker_for_run
+    real = run.open_venue
 
     def wrapped(*args, **kwargs):
-        broker, prior = real(*args, **kwargs)
-        seen.append(broker)
-        return broker, prior
+        opened = real(*args, **kwargs)
+        seen.append(opened.broker)
+        return opened
 
-    monkeypatch.setattr(run, "broker_for_run", wrapped)
+    monkeypatch.setattr(run, "open_venue", wrapped)
     mandate = _mandate(tmp_path / "fund.yaml")
     monkeypatch.setattr(
         sys, "argv",
@@ -355,3 +355,64 @@ def test_backtest_still_constructs_sim_broker(monkeypatch):
     assert all(isinstance(b, SimBroker) for b in constructed)
     assert all(getattr(b, "venue", "sim") == "sim" for b in constructed)
     assert result.records[0].cash_before == pytest.approx(100_000.0)
+
+
+# ---------------------------------------------------------------------------
+# --broker: which book the run opens
+# ---------------------------------------------------------------------------
+
+def _alpaca_env(monkeypatch, **flags):
+    for var in ("ALPACA_API_KEY", "ALPACA_SECRET_KEY", "ALPACA_API_SECRET",
+                "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "ALPACA_PAPER",
+                "ALPACA_TRADING_ENABLED", "ALPACA_LIVE_TRADING_CONFIRMED"):
+        monkeypatch.delenv(var, raising=False)
+    for key, value in flags.items():
+        monkeypatch.setenv(key, value)
+
+
+def test_broker_alpaca_without_keys_explains_what_is_missing(tmp_path, monkeypatch, capsys):
+    _alpaca_env(monkeypatch)
+    mandate = _mandate(tmp_path / "fund.yaml")
+    monkeypatch.setattr(sys, "argv",
+                        ["aihf", str(mandate), "--tickers", "AAPL", "--broker", "alpaca"])
+
+    with pytest.raises(SystemExit) as exc:
+        run.main()
+
+    assert exc.value.code == 2
+    assert "ALPACA_API_KEY" in capsys.readouterr().err
+
+
+def test_broker_alpaca_refuses_a_read_only_venue_before_working(tmp_path, monkeypatch, capsys):
+    """Better to stop here than to fail on the first order mid-cycle."""
+    _alpaca_env(monkeypatch, ALPACA_API_KEY="k", ALPACA_SECRET_KEY="s")
+    import hedge_fund.venue as venue_module
+    monkeypatch.setattr(venue_module, "AlpacaBroker", lambda settings: SimBroker(cash=1.0))
+    mandate = _mandate(tmp_path / "fund.yaml")
+    monkeypatch.setattr(sys, "argv",
+                        ["aihf", str(mandate), "--tickers", "AAPL", "--broker", "alpaca"])
+
+    with pytest.raises(SystemExit) as exc:
+        run.main()
+
+    err = capsys.readouterr().err
+    assert exc.value.code == 2
+    assert "read-only" in err
+    assert "ALPACA_TRADING_ENABLED=1" in err
+
+
+def test_broker_sim_runs_offline_and_writes_a_receipt(tmp_path, monkeypatch, capsys):
+    run = _patch_cli(monkeypatch, tmp_path, {"AAPL": 200.0, "SPY": 100.0})
+    mandate = _mandate(tmp_path / "fund.yaml")
+    output = tmp_path / "record.json"
+    monkeypatch.setattr(sys, "argv", [
+        "aihf", str(mandate), "--tickers", "AAPL", "--broker", "sim",
+        "--date", "2024-06-03", "--out", str(output),
+    ])
+
+    run.main()
+
+    record = CycleRecord.model_validate_json(output.read_text())
+    assert record.positions == {"AAPL": 500}
+    assert "venue: sim" in capsys.readouterr().err
+    assert list(tmp_path.glob("paper-desk-run-*.json"))

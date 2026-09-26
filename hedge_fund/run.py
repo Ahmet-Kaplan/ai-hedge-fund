@@ -55,13 +55,13 @@ from hedge_fund.backtesting import backtest_fund
 from hedge_fund.data import CachedDataClient, FDClient
 from hedge_fund.fund import ALLOCATOR_NAMES, Fund, load_spec, normalize_universe
 from hedge_fund.journal import FileOrderJournal, JournalledBroker, journal_summary
-from hedge_fund.ledger import broker_for_run, save_cycle_record
+from hedge_fund.ledger import save_cycle_record
 from hedge_fund.observability import CycleObserver, observe_cycle
 from hedge_fund.paths import ensure_mandates_dir, journal_path
 from hedge_fund.pipeline.models import PendingRunResult
-from hedge_fund.reconciliation import LedgerReference
 from hedge_fund.tui.keys import apply_credentials
 from hedge_fund.tui.shared import _BACKTEST_WEEKS
+from hedge_fund.venue import open_venue, VENUES
 
 
 def main() -> None:
@@ -107,6 +107,14 @@ def main() -> None:
         "--start",
         help=f"backtest start date YYYY-MM-DD (default: {_BACKTEST_WEEKS} weeks "
         "before --date)",
+    )
+    parser.add_argument(
+        "--broker",
+        choices=VENUES,
+        default="paper",
+        help="which book to run against (default: paper). 'alpaca' reads the "
+        "real account and reuses the newest receipt as the reconciliation "
+        "reference; it stays read-only until ALPACA_TRADING_ENABLED=1",
     )
     parser.add_argument(
         "--allocator",
@@ -195,20 +203,38 @@ def main() -> None:
         return
 
     receipts = ensure_mandates_dir()
-    broker, prior = broker_for_run(spec.name, spec.capital, receipts)
+    try:
+        venue = open_venue(args.broker, fund_name=spec.name,
+                           capital=spec.capital, receipts=receipts)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    # A venue that cannot submit is a setup state, not a mid-cycle surprise:
+    # refusing here beats discovering it when the first order is rejected.
+    if venue.name == "alpaca" and not venue.trading_enabled:
+        console.print(f"[yellow]{venue.note}[/]")
+        parser.error(
+            "the alpaca venue is read-only right now. To place orders set "
+            "ALPACA_TRADING_ENABLED=1 (and ALPACA_LIVE_TRADING_CONFIRMED=1 as "
+            "well if ALPACA_PAPER is false). Use --broker paper to rehearse "
+            "without touching the account."
+        )
+
+    tone = "bold yellow" if venue.live else "dim"
+    console.print(f"[{tone}]venue: {venue.label}  ·  {venue.note}[/]")
+    if venue.reference is not None:
+        console.print(
+            f"[dim]ledger expects {venue.reference.source} · "
+            f"cash ${venue.reference.cash:,.2f} · "
+            f"{len(venue.reference.positions)} positions[/]"
+        )
+
     # Journal every submission: the pipeline only writes a receipt once the
     # whole loop has filled, so without this a crash mid-execution would lose
     # the fills that already happened at the venue. `session` here is the
     # run's as-of date — the executed session lands in the receipt.
     journal = FileOrderJournal(journal_path(spec.name))
-    broker = JournalledBroker(broker, journal, fund=spec.name, session=args.date)
-    console.print("[dim]paper venue · live clock · fills at mark[/]")
-    if prior is not None:
-        console.print(
-            f"[dim]carrying book from {prior.as_of}  ·  "
-            f"NAV ${prior.nav:,.2f}  ·  "
-            f"{len(prior.positions)} positions[/]"
-        )
+    broker = JournalledBroker(venue.broker, journal, fund=spec.name, session=args.date)
 
     with FDClient() as raw:
         fd = CachedDataClient(raw)
@@ -228,9 +254,7 @@ def main() -> None:
             # working are visible before we trade on top of it.
             record = observe_cycle(
                 fund, args.date, broker, fd, universe, observer=observer,
-                reference=(
-                    LedgerReference.from_cycle_record(prior) if prior is not None else None
-                ),
+                reference=venue.reference,
             )
 
     receipt = save_cycle_record(record, receipts)
