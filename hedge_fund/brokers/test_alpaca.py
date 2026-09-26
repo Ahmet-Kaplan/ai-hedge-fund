@@ -38,6 +38,18 @@ class _RawAccount:
     cash: str = "25000.50"
     account_blocked: bool = False
     trading_blocked: bool = False
+    buying_power: str = "50000.00"
+    equity: str = "25000.50"
+    shorting_enabled: bool = True
+    daytrade_count: int = 0
+    pattern_day_trader: bool = False
+
+
+@dataclass
+class _RawCalendarDay:
+    date: str
+    open: str = "09:30"
+    close: str = "16:00"
 
 
 @dataclass
@@ -59,12 +71,13 @@ class FakeClient:
     """Stands in for alpaca-py's TradingClient."""
 
     def __init__(self, *, positions=None, account=None, order_script=None,
-                 clock_open=True, by_client_id=None):
+                 clock_open=True, by_client_id=None, calendar_days=None):
         self._positions = positions if positions is not None else []
         self._account = account or _RawAccount()
         self._script = list(order_script or [])
         self._clock_open = clock_open
         self._by_client_id = by_client_id
+        self._calendar_days = list(calendar_days or [])
         self.submitted = []
         self.polled = []
 
@@ -88,6 +101,9 @@ class FakeClient:
 
     def get_clock(self):
         return _RawClock(is_open=self._clock_open)
+
+    def get_calendar(self, request):
+        return list(self._calendar_days)
 
     def get_order_by_client_id(self, client_order_id):
         if self._by_client_id is None:
@@ -433,3 +449,64 @@ def test_an_unrelated_submit_failure_is_still_an_error():
 
     with pytest.raises(AlpacaOrderError, match="insufficient buying power"):
         _broker(Other()).place_order(Order(ticker="AAPL", side="buy", quantity=1, price=1.0))
+
+
+# ---------------------------------------------------------------------------
+# Account and calendar — the facts the pre-trade checks need
+# ---------------------------------------------------------------------------
+
+def test_account_is_normalised_off_the_sdk():
+    client = FakeClient(account=_RawAccount(
+        cash="1234.56", buying_power="9876.54", equity="4321.00",
+        shorting_enabled=True, daytrade_count=2, pattern_day_trader=False,
+    ))
+    broker = _broker(client)
+
+    account = broker.account()
+
+    assert account.venue == "alpaca-paper"
+    assert account.cash == pytest.approx(1234.56)
+    assert account.buying_power == pytest.approx(9876.54)
+    assert account.equity == pytest.approx(4321.00)
+    assert account.shorting_enabled is True
+    assert account.daytrade_count == 2
+    assert account.trading_blocked is False
+
+
+def test_missing_short_permission_reads_as_not_allowed():
+    """An unreadable permission must not be assumed to be granted."""
+
+    @dataclass
+    class NoShortFlag:
+        cash: str = "1.00"
+        buying_power: str = "1.00"
+        equity: str = "1.00"
+
+    broker = _broker(FakeClient(account=NoShortFlag()))
+    assert broker.account().shorting_enabled is False
+
+
+def test_blocked_account_is_reported_as_blocked():
+    broker = _broker(FakeClient(account=_RawAccount(trading_blocked=True)))
+    assert broker.account().trading_blocked is True
+
+
+def test_calendar_reports_sessions_and_half_days():
+    from datetime import date, datetime
+
+    # Alpaca returns a date for `date` and *datetimes* for open/close, which
+    # is exactly the shape that made str()[:5] render as "2024-".
+    client = FakeClient(calendar_days=[
+        _RawCalendarDay(date(2024, 11, 27),
+                        datetime(2024, 11, 27, 9, 30), datetime(2024, 11, 27, 16, 0)),
+        _RawCalendarDay(date(2024, 11, 29),
+                        datetime(2024, 11, 29, 9, 30), datetime(2024, 11, 29, 13, 0)),
+    ])
+    broker = _broker(client)
+
+    sessions = broker.calendar("2024-11-27", "2024-11-29")
+
+    assert [s["date"] for s in sessions] == ["2024-11-27", "2024-11-29"]
+    assert sessions[1]["close"] == "13:00"
+    assert broker.is_trading_day("2024-11-27") is True
+    assert broker.is_trading_day("2024-11-28") is False   # Thanksgiving

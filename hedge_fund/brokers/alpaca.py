@@ -33,6 +33,7 @@ from dataclasses import dataclass, replace
 from math import isfinite
 from typing import Any, Callable
 
+from hedge_fund.brokers.account import AccountSnapshot
 from hedge_fund.brokers.models import Fill, Order, Position
 
 logger = logging.getLogger(__name__)
@@ -288,6 +289,48 @@ class AlpacaBroker:
     def is_market_open(self) -> bool:
         return bool(self._client.get_clock().is_open)
 
+    def account(self) -> AccountSnapshot:
+        """Venue facts the pre-trade checks need, normalised away from the SDK.
+
+        `shorting_enabled` defaults to False when the field is missing: an
+        account whose short permission cannot be read must not be assumed to
+        have it.
+        """
+        raw = self._client.get_account()
+        return AccountSnapshot(
+            venue=self.venue,
+            cash=float(raw.cash),
+            buying_power=float(raw.buying_power),
+            equity=float(raw.equity),
+            shorting_enabled=bool(getattr(raw, "shorting_enabled", False)),
+            trading_blocked=bool(
+                getattr(raw, "account_blocked", False)
+                or getattr(raw, "trading_blocked", False)
+            ),
+            daytrade_count=int(getattr(raw, "daytrade_count", 0) or 0),
+            pattern_day_trader=bool(getattr(raw, "pattern_day_trader", False)),
+        )
+
+    def calendar(self, start: str, end: str) -> list[dict[str, Any]]:
+        """Exchange sessions between two dates, holidays and half-days included.
+
+        Bars cannot tell you a half-day from a holiday; the venue can.
+        """
+        from alpaca.trading.requests import GetCalendarRequest
+
+        days = self._client.get_calendar(GetCalendarRequest(start=start, end=end))
+        return [
+            {
+                "date": _iso_date(day.date),
+                "open": _hhmm(getattr(day, "open", None)),
+                "close": _hhmm(getattr(day, "close", None)),
+            }
+            for day in days
+        ]
+
+    def is_trading_day(self, day: str) -> bool:
+        return any(session["date"] == day for session in self.calendar(day, day))
+
     def open_orders(self) -> list[dict[str, Any]]:
         """Working orders, for reconciliation."""
         from alpaca.trading.enums import QueryOrderStatus
@@ -422,6 +465,23 @@ class AlpacaBroker:
                     f"{order.side} {order.quantity} {order.ticker}",
                 )
             latest = self._client.get_order_by_id(order_id)
+
+
+def _iso_date(value: Any) -> str:
+    """A session date as YYYY-MM-DD, whatever the SDK hands back."""
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d")
+    return str(value)[:10]
+
+
+def _hhmm(value: Any) -> str:
+    """A session time as HH:MM. Alpaca returns datetimes, not times, so the
+    first five characters would be the year."""
+    if value is None:
+        return ""
+    if hasattr(value, "strftime"):
+        return value.strftime("%H:%M")
+    return str(value)[:5]
 
 
 def _make_trading_client(settings: AlpacaSettings) -> Any:

@@ -17,6 +17,7 @@ frozen fundamentals (D/E, ROE, ...), even if the live feed moves.
 
 from __future__ import annotations
 
+import logging
 from datetime import date as _date
 from datetime import timedelta
 from math import isfinite
@@ -44,10 +45,13 @@ from hedge_fund.pipeline.models import (
     TickerSkip,
 )
 from hedge_fund.portfolio.construction import blend_signals, WEIGHT_TOLERANCE
+from hedge_fund.brokers.account import account_snapshot, preflight
 from hedge_fund.portfolio.validation import validate_targets
 from hedge_fund.reconciliation import LedgerReference, reconcile, require_settled
 from hedge_fund.risk.limits import apply_limits
 from hedge_fund.signals import get_investment_approach
+
+logger = logging.getLogger(__name__)
 
 # How far back to look for the most recent close: covers weekends, holiday
 # clusters, and short trading halts without reaching into stale history.
@@ -232,6 +236,20 @@ def execute_decision(
             raise ValueError(f"{ticker}: projected position violates max_position_pct")
     if sum(abs(w) for w in weights.values()) > spec.risk.max_gross_exposure + WEIGHT_TOLERANCE:
         raise ValueError("projected portfolio violates max_gross_exposure")
+    # The venue's own account rules, immediately before anything is sent:
+    # buying power (cash is not spendable cash), short permission, and the
+    # pattern-day-trader count. Skipped for brokers without an account.
+    snapshot = account_snapshot(broker)
+    preflight_report = None
+    if snapshot is not None:
+        preflight_report = preflight(snapshot, orders, held)
+        if not preflight_report.ok:
+            raise ValueError(
+                f"{spec.name}: refusing to submit orders — {preflight_report.summary}"
+            )
+        for warning in preflight_report.warnings:
+            logger.warning("%s: %s", spec.name, warning)
+
     fills: list[Fill] = [broker.place_order(order) for order in orders]
     positions = {t: p.shares for t, p in broker.positions().items()}
     cash = broker.cash()
@@ -245,6 +263,7 @@ def execute_decision(
         refreshed_assessment=effective.model_copy(deep=True),
         execution_as_of=session, execution_policy="next_close",
         reconciliation=reconciliation,
+        preflight=preflight_report,
     )
 
 

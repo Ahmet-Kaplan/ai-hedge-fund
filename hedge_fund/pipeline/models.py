@@ -19,6 +19,7 @@ from hedge_fund.brokers.models import Fill, Order
 from hedge_fund.fund.spec import FundSpec
 from hedge_fund.models import Signal
 from hedge_fund.portfolio.construction import FlatReason
+from hedge_fund.brokers.account import PreflightReport
 from hedge_fund.reconciliation import ReconciliationReport
 from hedge_fund.risk.limits import ClampEvent
 
@@ -120,3 +121,6 @@ class CycleRecord(BaseModel):
     # What the broker held versus what the last receipt claimed, as of this
     # execution. None when no reference was supplied.
     reconciliation: "ReconciliationReport | None" = None
+    # The venue's own account checks (buying power, short permission, day
+    # trades) as of this execution. None for venues without an account.
+    preflight: "PreflightReport | None" = None
