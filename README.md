@@ -108,6 +108,43 @@ export HEDGE_FUND_KILL_SWITCH=1
 
 `--once` prints a JSON result on stdout (`status` is `ran`, `skipped`, `halted`, or `not_due`). The always-on loop logs each evaluation to stderr and exits when the kill-switch is on. Idempotency keys live under `~/.hedge-fund/ticks/`.
 
+### Alpaca as the execution venue
+
+The fund's books are broker-agnostic: anything satisfying the `Broker` protocol
+(`positions` / `cash` / `place_order`) can execute a cycle. `AlpacaBroker` is a
+paper/live venue for that slot. It needs the optional SDK:
+
+```bash
+pip install alpaca-py
+```
+
+```python
+from hedge_fund.brokers import AlpacaBroker, AlpacaSettings
+from hedge_fund.pipeline import run_cycle
+
+broker = AlpacaBroker(AlpacaSettings.from_env())   # reads only, by default
+record = run_cycle(fund, as_of, broker, data_client, universe)
+```
+
+Order submission is gated three times over, so a half-remembered environment
+variable cannot move real money:
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `ALPACA_PAPER` | `true` | paper endpoint; reads always work |
+| `ALPACA_TRADING_ENABLED` | `false` | required before *any* order is submitted |
+| `ALPACA_LIVE_TRADING_CONFIRMED` | `false` | additionally required when `ALPACA_PAPER=false` |
+
+`ALPACA_API_SECRET` is accepted as an alias for `ALPACA_SECRET_KEY`.
+
+Two behaviours differ from the offline brokers on purpose. `place_order` must
+fill *completely* or raise — the fund sizes its book from the returned `Fill`,
+so Alpaca's asynchronous executions are polled briefly and anything short of a
+full fill raises `AlpacaOrderError` carrying the broker order id rather than
+inventing a fill. And a fractional position raises instead of being truncated,
+because `Position.shares` is an integer share count and rounding would desync
+the fund's books from the broker's.
+
 ## Development
 
 This fork lives at [bugman666/ai-hedge-fund](https://github.com/bugman666/ai-hedge-fund). See [CONTRIBUTING.md](CONTRIBUTING.md) for the first-test / first-backtest path.
