@@ -559,3 +559,25 @@ def test_backtest_daily_board_matches_final_metrics_and_uses_fill_dates(size, tm
             assert before == after
             assert "1 pending proposals" in _render(screen.query_one("#phase-line", Static).content)
     asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# Desk entry point
+# ---------------------------------------------------------------------------
+
+def test_home_offers_the_desk_and_d_opens_it():
+    """The desk is a third verb on the home menu, reachable by key too."""
+    async def scenario():
+        app = ui.HedgeFundApp()
+        async with app.run_test(size=(100, 35)) as pilot:
+            menu = app.screen.query_one("#home-menu", OptionList)
+            ids = [menu.get_option_at_index(i).id for i in range(menu.option_count)
+                   if menu.get_option_at_index(i).id is not None]
+            assert "desk" in ids
+
+            await pilot.press("d")
+            await pilot.pause()
+            return app.screen
+
+    screen = asyncio.run(scenario())
+    assert isinstance(screen, ui.DeskScreen)

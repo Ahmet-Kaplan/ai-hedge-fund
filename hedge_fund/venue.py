@@ -44,8 +44,15 @@ class OpenVenue:
 
     @property
     def trading_enabled(self) -> bool:
-        """Whether this venue would actually submit, rather than only read."""
-        return bool(self.settings is not None and self.settings.refuse_reason() is None)
+        """Whether orders submitted here will actually execute.
+
+        Sim and paper fill locally, so they always can. Alpaca depends on its
+        gates, and until they are open the venue is a read-only view of the
+        account.
+        """
+        if self.settings is None:
+            return True
+        return self.settings.refuse_reason() is None
 
 
 def open_venue(

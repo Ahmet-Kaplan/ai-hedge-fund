@@ -69,6 +69,29 @@ def deep_finite(*values: float) -> bool:
     return all(isfinite(v) for v in values)
 
 
+class PositionDetail(BaseModel):
+    """One holding with the venue's own valuation.
+
+    The `Broker` protocol reports signed share counts only, because sizing does
+    not need more. A desk does: an operator wants to see what each position is
+    worth and what it has made. Venues that can supply it expose
+    `position_details()`; the field stays optional so the plain protocol is
+    unaffected.
+    """
+
+    ticker: str
+    shares: int
+    avg_entry_price: float | None = None
+    current_price: float | None = None
+    market_value: float | None = None
+    unrealized_pnl: float | None = None
+    unrealized_pnl_pct: float | None = None
+
+    @property
+    def side(self) -> str:
+        return "long" if self.shares >= 0 else "short"
+
+
 class PreflightReport(BaseModel):
     """What the venue would say about this set of orders."""
 

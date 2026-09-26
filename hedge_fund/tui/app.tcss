@@ -436,3 +436,89 @@ ConfirmDeleteScreen {
 #bt-done-menu {
     height: auto;
 }
+
+/* ---------------- desk (read-only account view) ---------------- */
+
+#desk {
+    height: 1fr;
+    padding: 1 2;
+}
+
+#desk-head {
+    height: auto;
+    margin-bottom: 1;
+}
+
+#desk-stats {
+    height: auto;
+    margin-bottom: 1;
+}
+
+#desk-positions {
+    height: auto;
+    border: round #1f2b25;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+#desk-warnings {
+    height: auto;
+    color: #5f7268;
+}
+
+/* ---------------- order ticket ---------------- */
+
+OrderTicketScreen {
+    align: center middle;
+    background: #0b100e 70%;
+}
+
+#ticket {
+    width: 76;
+    max-width: 94%;
+    height: auto;
+    padding: 1 3;
+    background: #101613;
+    border: round #f87171;
+}
+
+#ticket-title {
+    margin-bottom: 1;
+}
+
+#ticket-hint {
+    margin-bottom: 1;
+}
+
+#ticket-body {
+    height: auto;
+    margin-top: 1;
+}
+
+/* ---------------- reconciliation ---------------- */
+
+ReconciliationScreen {
+    align: center middle;
+    background: #0b100e 70%;
+}
+
+#recon {
+    width: 86;
+    max-width: 94%;
+    height: auto;
+    padding: 1 3;
+    background: #101613;
+    border: round #22d3ee;
+}
+
+#recon-title {
+    margin-bottom: 1;
+}
+
+#recon-body {
+    height: auto;
+}
+
+#recon-foot {
+    margin-top: 1;
+}

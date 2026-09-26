@@ -68,8 +68,15 @@ from hedge_fund.tui.keys import (
     PROVIDER_ENV_VARS,
     save_credential,
 )
+from hedge_fund.tui.desk import DeskScreen
 from hedge_fund.tui.shared import (
     _agent_names,
+    BRIGHT,
+    CYAN,
+    GREEN,
+    MUTED,
+    RED,
+    TEXT,
     _BACKTEST_WEEKS,
     _BOARD_REFRESH,
     _DEFAULT_MODEL_LABEL,
@@ -93,14 +100,6 @@ from hedge_fund.tui.shared import (
     VERSION,
 )
 
-# The palette, mirrored from app.tcss (rich styles can't read CSS variables).
-GREEN = "#2bd97c"
-CYAN = "#22d3ee"
-RED = "#f87171"
-TEXT = "#d9e6e0"
-BRIGHT = "#f2f7f4"
-MUTED = "#5f7268"
-
 _CUSTOM = "custom"  # sentinel value in the strategy list for "build your own"
 
 
@@ -113,6 +112,7 @@ class HomeScreen(Screen):
     BINDINGS = [
         Binding("m", "pick_model", "switch model"),
         Binding("k", "set_key", "api key"),
+        Binding("d", "open_desk", "desk"),
         Binding("escape", "quit_app", "quit"),
     ]
 
@@ -133,6 +133,12 @@ class HomeScreen(Screen):
                         ("Build a new fund\n", "bold"),
                         ("compose agents into strategies from scratch", MUTED)),
                     id="build"),
+                None,
+                Option(
+                    Text.assemble(
+                        ("Desk\n", "bold"),
+                        ("watch the account: positions, P&L, buying power", MUTED)),
+                    id="desk"),
                 id="home-menu",
             )
             yield Static("", id="model-line")
@@ -163,6 +169,9 @@ class HomeScreen(Screen):
         self._model_id = model_id
         os.environ["HEDGE_FUND_LLM_MODEL"] = model_id
         self._show_model()
+
+    def action_open_desk(self) -> None:
+        self.app.push_screen(DeskScreen())
 
     def action_set_key(self) -> None:
         """Set the key for the selected model's provider, before a run needs
@@ -200,6 +209,8 @@ class HomeScreen(Screen):
             self.app.push_screen(FundSelectScreen())
         elif event.option.id == "build":
             self.app.push_screen(BuilderScreen())
+        elif event.option.id == "desk":
+            self.app.push_screen(DeskScreen())
 
 
 class KeyPromptScreen(ModalScreen[bool]):

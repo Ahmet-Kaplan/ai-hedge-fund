@@ -33,7 +33,7 @@ from dataclasses import dataclass, replace
 from math import isfinite
 from typing import Any, Callable
 
-from hedge_fund.brokers.account import AccountSnapshot
+from hedge_fund.brokers.account import AccountSnapshot, PositionDetail
 from hedge_fund.brokers.models import Fill, Order, Position
 
 logger = logging.getLogger(__name__)
@@ -289,6 +289,30 @@ class AlpacaBroker:
     def is_market_open(self) -> bool:
         return bool(self._client.get_clock().is_open)
 
+    def position_details(self) -> list[PositionDetail]:
+        """Holdings with the venue's own valuation — what a desk screen shows.
+
+        `positions()` stays the sizing view (signed share counts). This is the
+        richer read: average entry, current price, market value and unrealized
+        P&L, straight from the venue, so no extra market-data call is needed.
+        """
+        details: list[PositionDetail] = []
+        for raw in self._client.get_all_positions():
+            ticker = str(raw.symbol).upper()
+            shares = _int_shares(ticker, raw.qty)
+            if not shares:
+                continue
+            details.append(PositionDetail(
+                ticker=ticker,
+                shares=shares,
+                avg_entry_price=_opt_float(getattr(raw, "avg_entry_price", None)),
+                current_price=_opt_float(getattr(raw, "current_price", None)),
+                market_value=_opt_float(getattr(raw, "market_value", None)),
+                unrealized_pnl=_opt_float(getattr(raw, "unrealized_pl", None)),
+                unrealized_pnl_pct=_opt_float(getattr(raw, "unrealized_plpc", None)),
+            ))
+        return details
+
     def account(self) -> AccountSnapshot:
         """Venue facts the pre-trade checks need, normalised away from the SDK.
 
@@ -465,6 +489,17 @@ class AlpacaBroker:
                     f"{order.side} {order.quantity} {order.ticker}",
                 )
             latest = self._client.get_order_by_id(order_id)
+
+
+def _opt_float(value: Any) -> float | None:
+    """A venue number as a float, or None when it is absent or unusable."""
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isfinite(parsed) else None
 
 
 def _iso_date(value: Any) -> str:

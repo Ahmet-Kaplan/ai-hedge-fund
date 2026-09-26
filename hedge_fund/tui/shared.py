@@ -30,6 +30,14 @@ except PackageNotFoundError:  # running from source without an install
 
 # Strategy libraries live in hedge_fund/strategies/ (code, inside the package).
 # Mandates the app writes are user data and live in ~/.hedge-fund/ (see paths.py).
+# The palette, mirrored from app.tcss (rich styles can't read CSS variables).
+GREEN = "#2bd97c"
+CYAN = "#22d3ee"
+RED = "#f87171"
+TEXT = "#d9e6e0"
+BRIGHT = "#f2f7f4"
+MUTED = "#5f7268"
+
 STRATEGY_DIR = Path(__file__).resolve().parent.parent / "strategies"
 FUNDS_DIR = MANDATES_DIR
 
