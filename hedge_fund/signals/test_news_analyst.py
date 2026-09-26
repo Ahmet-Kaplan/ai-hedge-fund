@@ -117,3 +117,23 @@ class TestNewsSnapshot:
         assert a.content_hash == b.content_hash
         assert a.render() == b.render()
         assert "2025-08-02" not in b.render()
+
+    def test_blind_render_withholds_ticker(self):
+        snap = build_news_snapshot("TEST", "2025-08-01", MockDataClient(_feed()))
+        blinded = snap.render(blind=True)
+        assert "(withheld)" in blinded
+        assert "Company: TEST" not in blinded
+        # Blind is opt-in: the default render still names the company.
+        assert "Company: TEST" in snap.render()
+
+    def test_blind_agent_prompt_withholds_ticker(self, tmp_path):
+        """A backtest builds its NewsAnalystAgent blind; the prompt must follow."""
+        llm = FakeLLM(BEARISH)
+        agent = NewsAnalystAgent(
+            llm=llm, cache=PromptCache(tmp_path / "llm"), blind=True,
+        )
+        agent.predict("TEST", "2025-08-01", MockDataClient(_feed()))
+        assert "Company: TEST" not in llm.last_user
+        assert "(withheld)" in llm.last_user
+        # The headlines themselves still reach the model.
+        assert "Guidance raised" in llm.last_user

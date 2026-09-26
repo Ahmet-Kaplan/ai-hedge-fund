@@ -78,10 +78,18 @@ class NewsSnapshot(BaseModel):
         canonical = self.model_dump_json(exclude={"as_of"})
         return hashlib.sha256(canonical.encode()).hexdigest()[:24]
 
-    def render(self) -> str:
-        """Compact text block for the LLM prompt (no `as_of`, so cache-stable)."""
+    def render(self, blind: bool = False) -> str:
+        """Compact text block for the LLM prompt (no `as_of`, so cache-stable).
+
+        `blind=True` withholds the ticker, matching FundamentalsSnapshot: a
+        backtest must not let a model that remembers the company recall the
+        outcome it is being scored on. Headline dates stay — they are the
+        substance of a news snapshot, and the headlines themselves already
+        name the company often enough that hiding only the label buys the
+        same limited protection the fundamentals snapshot does.
+        """
         lines = [
-            f"Company: {self.ticker}",
+            f"Company: {'(withheld)' if blind else self.ticker}",
             f"{len(self.headlines)} distinct headlines from the last "
             f"{self.lookback_days} days, newest first. All were public by their "
             "dates; treat the newest as the present.",

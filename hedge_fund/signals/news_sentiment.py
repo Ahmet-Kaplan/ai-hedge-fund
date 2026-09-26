@@ -46,6 +46,9 @@ class NewsSentimentModel(QuantModel):
     FinBERT is loaded lazily on first use.
     """
 
+    # Long positive news flow, short negative — signed on both sides.
+    investment_approach = "long_short"
+
     def __init__(
         self,
         *,

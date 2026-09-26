@@ -27,16 +27,21 @@ from hedge_fund.signals.llm_agent import LLMAgent
 class NewsAnalystAgent(LLMAgent):
     """Reasons over recent company headlines."""
 
+    # A news desk takes both sides: a materially negative news flow is a
+    # reason to be short, not merely a reason to stand aside.
+    investment_approach = "long_short"
+
     def __init__(
         self,
         llm: LLMClient | None = None,
         cache: PromptCache | None = None,
         *,
+        blind: bool = False,
         lookback_days: int = DEFAULT_LOOKBACK_DAYS,
         min_headlines: int = 3,
         news_limit: int = DEFAULT_NEWS_LIMIT,
     ) -> None:
-        super().__init__(llm=llm, cache=cache)
+        super().__init__(llm=llm, cache=cache, blind=blind)
         self._lookback_days = lookback_days
         self._min_headlines = min_headlines
         self._news_limit = news_limit
