@@ -42,9 +42,19 @@ DISPLAY_NAMES = {
     "graham": "Benjamin Graham",
     "lynch": "Peter Lynch",
     "druckenmiller": "Stanley Druckenmiller",
+    "wood": "Cathie Wood",
+    "burry": "Michael Burry",
+    "ackman": "Bill Ackman",
+    "damodaran": "Aswath Damodaran",
+    "fisher": "Phil Fisher",
+    "pabrai": "Mohnish Pabrai",
+    "taleb": "Nassim Taleb",
+    "jhunjhunwala": "Rakesh Jhunjhunwala",
     "pead": "post-earnings drift",
     "news_sentiment": "news sentiment",
     "news_analyst": "News Desk Analyst",
+    "momentum": "price momentum",
+    "mean_reversion": "mean reversion",
 }
 
 _SHORT_NAMES = {
@@ -53,9 +63,19 @@ _SHORT_NAMES = {
     "graham": "Graham",
     "lynch": "Lynch",
     "druckenmiller": "Druckenmiller",
+    "wood": "Wood",
+    "burry": "Burry",
+    "ackman": "Ackman",
+    "damodaran": "Damodaran",
+    "fisher": "Fisher",
+    "pabrai": "Pabrai",
+    "taleb": "Taleb",
+    "jhunjhunwala": "Jhunjhunwala",
     "pead": "PEAD",
     "news_sentiment": "News",
     "news_analyst": "NewsDesk",
+    "momentum": "Momentum",
+    "mean_reversion": "Mean-rev",
 }
 
 MODE_LABELS: dict[PortfolioMode, str] = {"long_only": "Long-only", "long_short": "Long/short", "dollar_neutral": "Dollar-neutral"}

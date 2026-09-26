@@ -10,6 +10,9 @@ from pydantic import ValidationError
 from hedge_fund.fund import (
     custom_strategy,
     discover_funds,
+)
+from hedge_fund.fund.allocator import EqualWeightAllocator, StaticAllocator
+from hedge_fund.fund.spec import (
     Fund,
     FundSpec,
     load_spec,
@@ -54,6 +57,7 @@ def test_defaults_applied():
     assert spec.capital == 100_000.0
     assert spec.rebalance == "weekly"
     assert spec.benchmark == "SPY"
+    assert spec.allocator == "static"
 
 
 def test_rebalance_cadence_validated():
@@ -123,6 +127,7 @@ def test_fund_staffs_each_strategy_once():
     assert len(staff) == 1
     # The same objects persist for the fund's lifetime — caches survive cycles.
     assert fund.strategies[0][1][0] is staff[0]
+    assert isinstance(fund.allocator, StaticAllocator)
 
 
 @pytest.mark.parametrize(
@@ -253,3 +258,19 @@ def test_blind_reaches_llm_agents_only(monkeypatch, blind):
     expected = {"blind": True} if blind else {}
     assert seen["buffett"] == expected
     assert seen["druckenmiller"] == expected
+
+
+def test_unknown_allocator_rejected():
+    with pytest.raises(ValidationError, match="unknown allocator"):
+        FundSpec(**{**MINIMAL, "allocator": "risk_parity"})
+
+
+def test_equal_weight_allocator_from_mandate():
+    fund = Fund(FundSpec(**{**MINIMAL, "allocator": "equal_weight"}))
+    assert isinstance(fund.allocator, EqualWeightAllocator)
+
+
+def test_allocator_override_on_fund():
+    injected = EqualWeightAllocator()
+    fund = Fund(FundSpec(**MINIMAL), allocator=injected)
+    assert fund.allocator is injected

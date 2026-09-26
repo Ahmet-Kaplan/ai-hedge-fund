@@ -1,4 +1,27 @@
-"""Validated fund configurations, strategy composition, and model construction."""
+"""FundSpec — a fund's mandate as data, and the Fund that lives it.
+
+The hierarchy mirrors a real shop (see VISION.md):
+
+    FUND      = an allocator (CIO) over STRATEGIES  (master risk on the netted book)
+    STRATEGY  = a blend policy over MODELS          (a "pod")
+    MODEL     = an alpha model -> Signal
+
+Models come in two kinds, and the strategy's character follows from its
+staff: a strategy of LLM investor AGENTS (Buffett, Munger, ...) is a
+discretionary pod — its identity is who's on the desk; a strategy powered
+by quant models (PEAD, ...) is a systematic pod — its identity is the edge
+it harvests. Same spec shape, same engine slot; the kind is derived, never
+declared.
+
+Specs are data (a Loop-2 ground rule): a mandate is a serializable YAML/JSON
+config. The wizard, a chat LLM, and the strategy generator all emit this same
+format — nothing downstream ever needs to know who authored a fund.
+
+A `Fund` is the living counterpart: the spec plus its models instantiated
+once. Models are stateful (LLM prompt caches, PEAD earnings caches), so
+they must be constructed per fund — never per cycle — for caches to survive
+across cycles.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +31,7 @@ from typing import Any, Literal, TypeAlias
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, ValidationError
 
+from hedge_fund.fund.allocator import ALLOCATOR_NAMES, Allocator, get_allocator
 from hedge_fund.risk.limits import RiskLimits
 from hedge_fund.signals import ALPHA_MODEL_REGISTRY, LLMAgent, get_investment_approach
 from hedge_fund.signals.base import AlphaModel
@@ -44,9 +68,10 @@ class BlendPolicy(BaseModel):
 class StrategySpec(BaseModel):
     """A strategy ("pod"): signal models plus the policy that blends them.
 
-    `weight` is the fund's capital slice for this strategy, relative to its
-    siblings (normalized at netting time — 2/2 means the same as 1/1). In a
-    library file (hedge_fund/strategies/) it stays at the default; slices are a
+    `weight` is the fund's static capital slice for this strategy, relative
+    to its siblings (normalized by StaticAllocator — 2/2 means the same as
+    1/1). Other allocators may ignore it. In a library file
+    (hedge_fund/strategies/) it stays at the default; slices are a
     fund-assembly decision, not a property of the strategy itself.
     """
 
@@ -81,11 +106,21 @@ class FundSpec(BaseModel):
     schema_version: Literal[2]
     name: str
     strategies: list[StrategySpec] = Field(min_length=1)
+    allocator: str = Field(
+        default="static",
+        description="CIO policy that turns strategy context into capital "
+        "slices. 'static' (default) normalizes StrategySpec.weight — today's "
+        "behavior. 'equal_weight' is a selectable stub that splits capital "
+        "evenly.",
+    )
     risk: RiskLimits
     capital: float = Field(default=100_000.0, gt=0)
     rebalance: Literal["daily", "weekly", "monthly"] = Field(
         default="weekly",
-        description="rebalance frequency used by the backtester",
+        description="how often the fund re-runs its cycle — a mandate choice, "
+        "not an engine constant: a fundamentals fund trades weekly, a "
+        "news-driven fund daily. The backtester and the scheduler daemon obey "
+        "it; run_cycle itself never sees it.",
     )
     benchmark: str = Field(
         default="SPY",
@@ -96,6 +131,15 @@ class FundSpec(BaseModel):
     @classmethod
     def _uppercase_benchmark(cls, ticker: str) -> str:
         return ticker.upper()
+
+    @field_validator("allocator")
+    @classmethod
+    def _known_allocator(cls, name: str) -> str:
+        if name not in ALLOCATOR_NAMES:
+            raise ValueError(
+                f"unknown allocator {name!r}; available: {sorted(ALLOCATOR_NAMES)}"
+            )
+        return name
 
     @field_validator("strategies")
     @classmethod
@@ -177,6 +221,11 @@ class Fund:
     `blind=True` is for backtests: the LLM agents render prompts without
     the ticker, industry or calendar dates, so the result can't lean on
     what the model remembers about the company. Quant models are unaffected.
+
+    The `models` override (strategy name -> instances) exists for tests to
+    inject fakes; production callers let the registry build the staff.
+    The `allocator` override injects a CIO; production callers use the
+    mandate's `allocator` field (default: static slices).
     """
 
     def __init__(
@@ -184,8 +233,12 @@ class Fund:
         spec: FundSpec,
         models: dict[str, list[AlphaModel]] | None = None,
         blind: bool = False,
+        allocator: Allocator | None = None,
     ) -> None:
         self.spec = spec
+        self.allocator: Allocator = (
+            allocator if allocator is not None else get_allocator(spec.allocator)
+        )
         self.strategies: list[tuple[StrategySpec, list[AlphaModel]]] = []
         for strategy in spec.strategies:
             if models is not None:

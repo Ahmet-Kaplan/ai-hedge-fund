@@ -7,9 +7,12 @@
 #
 #   aihf ~/.hedge-fund/mandates/example.yaml --tickers AAPL,MSFT
 #   aihf ~/.hedge-fund/mandates/example.yaml --tickers AAPL,MSFT --backtest
+#   python -m hedge_fund.daemon ~/.hedge-fund/mandates/example.yaml --tickers AAPL,MSFT
 #
 schema_version: 2
 name: example-fund
+# allocator: static          # default CIO; equal_weight is a selectable stub
+#                            # (`--allocator equal_weight`, or set the field)
 strategies:
   - name: deep-value          # discretionary pod: Graham-led, long-only
     blend: {mode: long_only}

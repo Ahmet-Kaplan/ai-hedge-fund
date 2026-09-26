@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from math import isfinite
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Mapping
 
 from hedge_fund.portfolio.construction import blend_signals, WEIGHT_TOLERANCE
 from hedge_fund.signals import get_investment_approach
@@ -13,12 +13,22 @@ if TYPE_CHECKING:
     from hedge_fund.pipeline.models import StrategyRecord
 
 
-def validate_targets(spec: FundSpec, strategies: list[StrategyRecord], final_weights: dict[str, float]) -> None:
+def validate_targets(
+    spec: FundSpec,
+    strategies: list[StrategyRecord],
+    final_weights: dict[str, float],
+    slices: Mapping[str, float] | None = None,
+) -> None:
     """Raise ValueError if the proposed book violates its recorded mandate.
 
     Short evidence is recomputed from the signals and declared profiles rather
     than trusting the sizing output. All checks run before any orders are sent.
     Contributions are fractions of fund equity, not of strategy capital.
+
+    `slices` is the capital split the CIO actually decided for this tick. Pass
+    it whenever an allocator produced the book; the default (None) recomputes
+    the mandate's static ``weight / total`` split, which is only right for the
+    static allocator.
     """
     by_name = {s.name: s for s in spec.strategies}
     if len(strategies) != len(by_name) or {s.name for s in strategies} != set(by_name):
@@ -26,11 +36,19 @@ def validate_targets(spec: FundSpec, strategies: list[StrategyRecord], final_wei
     total_slice = sum(s.weight for s in spec.strategies)
     if not isfinite(total_slice) or total_slice <= 0:
         raise ValueError(f"{spec.name}: strategy allocations must have a finite, positive total")
+    if slices is None:
+        expected_slices: Mapping[str, float] = {
+            s.name: s.weight / total_slice for s in spec.strategies
+        }
+    else:
+        expected_slices = slices
+        if set(expected_slices) != set(by_name):
+            raise ValueError(f"{spec.name}: allocator slices do not cover the mandate")
     combined: dict[str, float] = {}
     for record in strategies:
         strategy = by_name[record.name]
         scope = f"strategy {strategy.name!r}"
-        expected_slice = strategy.weight / total_slice
+        expected_slice = expected_slices[strategy.name]
         if not isfinite(record.slice) or record.slice <= 0 or abs(record.slice - expected_slice) > WEIGHT_TOLERANCE:
             raise ValueError(f"{scope}: capital slice does not match the mandate")
         evidence = blend_signals(

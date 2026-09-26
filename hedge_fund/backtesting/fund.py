@@ -1,4 +1,22 @@
-"""Daily fund replay with assessments followed by next-close execution."""
+"""Daily fund replay with assessments followed by next-close execution.
+
+This is the fund-level backtester: the real pipeline in a loop over history
+against a persistent SimBroker. Nothing here re-implements pipeline
+mechanics — every tick replays the same `assess_fund` / `execute_decision`
+pair a live cycle runs, so anything true of one cycle (point-in-time data,
+fail-loud pricing, master risk on the netted book) is true of every
+backtested tick by construction.
+
+Nothing here assumes what the fund trades on. The rebalance cadence comes
+from the mandate (FundSpec.rebalance): a fundamentals fund says weekly, a
+news-driven fund can say daily. The trading-day grid derives from the
+mandate's benchmark's actual bars — holidays and half-weeks fall out
+naturally, no exchange calendar math.
+
+This is the fund-level counterpart to the per-model harness in engine.py
+(BacktestEngine simulates one alpha model's views with fixed mechanics;
+backtest_fund runs the whole shop).
+"""
 
 from __future__ import annotations
 

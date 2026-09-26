@@ -132,8 +132,10 @@ class LLMAgent(AlphaModel):
     def build_snapshot(self, ticker: str, date: str, data_client: DataClient) -> Snapshot:
         """What this persona is allowed to know. Default: the shared
         point-in-time fundamentals snapshot — right for value/quality
-        personas. Override for personas that reason over different data
-        (see NewsAnalystAgent); any object satisfying `Snapshot` works."""
+        personas. A cycle binds a SnapshotCache so every persona on the
+        same name reads one frozen view. Override for personas that
+        reason over different data (see NewsAnalystAgent); any object
+        satisfying `Snapshot` works."""
         return build_snapshot(ticker, date, data_client)
 
     def build_user_prompt(self, snapshot: Snapshot) -> str:

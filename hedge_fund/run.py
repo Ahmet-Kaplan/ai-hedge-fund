@@ -8,14 +8,30 @@ Usage::
         cadence — or backtest a saved fund and watch its equity curve draw
         against its benchmark.
 
-    aihf ~/.hedge-fund/mandates/example.yaml --tickers AAPL,MSFT
-        With a mandate: assess and execute at the next completed close, or
-        return a pending proposal. JSON prints to stdout; a short human summary
-        goes to stderr. Add --out record.json to also write it to a file.
+    aihf ~/.hedge-fund/mandates/example.yaml --tickers AAPL,MSFT [--paper]
+        With a mandate: one live-clock paper cycle (PaperBroker fills at
+        mark; no live venue). --paper is the explicit flag and is also the
+        default without --backtest. Assessment uses --date; execution lands
+        on the next completed session close, so a proposal with no completed
+        session yet comes back as a pending record instead. If this mandate
+        has a prior CycleRecord receipt, the broker opens that ending book so
+        cash, positions, and NAV carry forward; otherwise it opens at the
+        mandate's capital. A corrupt or incompatible receipt fails the run.
+        The full record prints to stdout as JSON (pipe it anywhere); a short
+        human summary goes to stderr. Add --out record.json to also write a
+        copy to a file. Optional cycle observability (--heartbeat / --events,
+        or HEDGE_FUND_* env vars) records start/end/error without needing a
+        live venue.
 
     aihf ~/.hedge-fund/mandates/example.yaml --tickers AAPL,MSFT --backtest
-        Backtest the mandate with daily valuations and next-close execution;
-        the full result JSON prints to stdout.
+        Backtest the mandate: run_cycle looped over history at the mandate's
+        rebalance cadence against SimBroker, executed at the next completed
+        close; the full result JSON prints to stdout. Mutually exclusive
+        with --paper.
+
+    --allocator {static,equal_weight}
+        Override the mandate's CIO. static (default) keeps StrategySpec
+        slices; equal_weight is a stub that splits capital evenly.
 
 A mandate is the desk — strategies, staff, risk, capital, cadence — and never
 names tickers; --tickers says what to point it at for this run.
@@ -36,11 +52,11 @@ from pathlib import Path
 from rich.console import Console
 
 from hedge_fund.backtesting import backtest_fund
-from hedge_fund.brokers import SimBroker
 from hedge_fund.data import CachedDataClient, FDClient
-from hedge_fund.fund import Fund, load_spec, normalize_universe
+from hedge_fund.fund import ALLOCATOR_NAMES, Fund, load_spec, normalize_universe
+from hedge_fund.ledger import broker_for_run, save_cycle_record
+from hedge_fund.observability import CycleObserver, observe_cycle
 from hedge_fund.paths import ensure_mandates_dir
-from hedge_fund.pipeline import run_cycle
 from hedge_fund.pipeline.models import PendingRunResult
 from hedge_fund.tui.keys import apply_credentials
 from hedge_fund.tui.shared import _BACKTEST_WEEKS
@@ -52,8 +68,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         prog="aihf",
         description="Run the AI hedge fund. No arguments: launch the "
-        "interactive app. With a mandate YAML: run one cycle and print the "
-        "record.",
+        "interactive app. With a mandate YAML: run one live-clock paper "
+        "cycle (seeded from the newest receipt when one exists) and print "
+        "the record, or --backtest over history.",
     )
     parser.add_argument("mandate", nargs="?",
                         help="path to a fund spec YAML, e.g. "
@@ -71,15 +88,30 @@ def main() -> None:
         help="analysis date YYYY-MM-DD (default: today), capped at yesterday "
         "in New York; execution uses the next completed session close",
     )
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--paper", action="store_true",
+        help="run one live-clock paper cycle: PaperBroker fills at mark "
+        "(no live venue); seed from the newest CycleRecord when one exists. "
+        "This is also the default without --backtest",
+    )
+    mode.add_argument(
         "--backtest", action="store_true",
-        help="backtest from --start to --date with daily valuation and next-close "
-        "execution; full result JSON on stdout",
+        help="backtest the mandate instead of running one cycle: one run_cycle "
+        "per rebalance date from --start to --date against SimBroker, with "
+        "daily valuation and next-close execution; full result JSON on stdout",
     )
     parser.add_argument(
         "--start",
         help=f"backtest start date YYYY-MM-DD (default: {_BACKTEST_WEEKS} weeks "
         "before --date)",
+    )
+    parser.add_argument(
+        "--allocator",
+        choices=sorted(ALLOCATOR_NAMES),
+        help="CIO capital-allocation policy (default: the mandate's "
+        "allocator, else static). equal_weight is a stub that ignores "
+        "mandate slices and splits capital evenly",
     )
     parser.add_argument(
         "--model",
@@ -88,6 +120,24 @@ def main() -> None:
         "ignore it",
     )
     parser.add_argument("--out", help="also write the record JSON to this file")
+    parser.add_argument(
+        "--heartbeat",
+        nargs="?",
+        const="default",
+        metavar="PATH",
+        help="write a cycle heartbeat file (default: "
+        "~/.hedge-fund/observability/heartbeat.json). Also honored via "
+        "HEDGE_FUND_HEARTBEAT_PATH or HEDGE_FUND_HEARTBEAT=1",
+    )
+    parser.add_argument(
+        "--events",
+        nargs="?",
+        const="default",
+        metavar="PATH",
+        help="append cycle start/end/error events as JSONL (default: "
+        "~/.hedge-fund/observability/events.jsonl). Also honored via "
+        "HEDGE_FUND_EVENTS_PATH",
+    )
     args = parser.parse_args()
 
     if args.model:
@@ -110,6 +160,8 @@ def main() -> None:
         spec = load_spec(args.mandate)
     except ValueError as exc:
         parser.error(str(exc))
+    if args.allocator is not None:
+        spec = spec.model_copy(update={"allocator": args.allocator})
     # A backtest blinds the investor agents' prompts (no ticker, industry or
     # calendar dates): the LLM may have been trained on what those companies
     # did over the window, and that memory would otherwise score as skill.
@@ -140,19 +192,34 @@ def main() -> None:
         )
         return
 
-    broker = SimBroker(cash=spec.capital)
+    receipts = ensure_mandates_dir()
+    broker, prior = broker_for_run(spec.name, spec.capital, receipts)
+    console.print("[dim]paper venue · live clock · fills at mark[/]")
+    if prior is not None:
+        console.print(
+            f"[dim]carrying book from {prior.as_of}  ·  "
+            f"NAV ${prior.nav:,.2f}  ·  "
+            f"{len(prior.positions)} positions[/]"
+        )
 
     with FDClient() as raw:
         fd = CachedDataClient(raw)
         n_models = sum(len(staff) for _, staff in fund.strategies)
         with console.status(
-            f"[cyan]{spec.name}: running one cycle as of {args.date} — "
+            f"[cyan]{spec.name}: paper cycle as of {args.date} — "
             f"{len(universe)} tickers x {n_models} models "
             f"across {len(fund.strategies)} strategies…",
             spinner="dots",
         ):
-            record = run_cycle(fund, args.date, broker, fd, universe)
+            observer = CycleObserver.from_env(
+                events_path=args.events,
+                heartbeat_path=args.heartbeat,
+            )
+            record = observe_cycle(
+                fund, args.date, broker, fd, universe, observer=observer,
+            )
 
+    receipt = save_cycle_record(record, receipts)
     print(record.model_dump_json(indent=2))
     if args.out:
         Path(args.out).write_text(record.model_dump_json(indent=2))
@@ -180,6 +247,13 @@ def main() -> None:
     )
     if record.skipped:
         console.print(f"[dim]skipped: {', '.join(s.ticker for s in record.skipped)}[/]")
+    if record.dropped:
+        console.print(
+            "[dim]dropped: "
+            + ", ".join(f"{d.model}@{d.ticker} ({d.reason})" for d in record.dropped)
+            + "[/]"
+        )
+    console.print(f"[dim]saved {receipt}[/]")
 
 
 if __name__ == "__main__":

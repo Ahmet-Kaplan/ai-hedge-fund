@@ -1,4 +1,19 @@
-"""Assess investment views and execute them at a subsequent completed close."""
+"""Assess investment views and execute them at a subsequent completed close.
+
+    point-in-time data -> shared snapshot -> analysts -> blend -> risk -> assess
+                                                                          |
+                                              exact close -> execute -> record
+
+Assessment and execution are separate on purpose. `assess_fund` is
+broker-free (it states the desired book from a cutoff date alone), which is
+what lets a proposal be reviewed before any order is priced. `run_cycle`
+ties the two together: it assesses at the effective cutoff and executes only
+on a later *completed* session, so nothing is ever sized against a bar that
+was still forming when the views were formed.
+
+One SnapshotCache spans each tick: every analyst on a ticker reads the same
+frozen fundamentals (D/E, ROE, ...), even if the live feed moves.
+"""
 
 from __future__ import annotations
 
@@ -10,12 +25,20 @@ from hedge_fund.brokers.models import Fill
 from hedge_fund.brokers.protocol import Broker
 from hedge_fund.data.protocol import DataClient
 from hedge_fund.data.sessions import completed_through, previous_day, session_closes
+from hedge_fund.features.snapshot import SnapshotCache
 from hedge_fund.fund import Fund, normalize_universe
+from hedge_fund.fund.allocator import (
+    Allocator,
+    AllocatorContext,
+    StrategyAllocationView,
+    require_slices,
+)
 from hedge_fund.models import Signal
 from hedge_fund.pipeline.execution import build_orders
 from hedge_fund.pipeline.models import (
     CycleRecord,
     DecisionRecord,
+    DroppedOutput,
     PendingRunResult,
     StrategyRecord,
     TickerSkip,
@@ -31,9 +54,26 @@ _MARK_LOOKBACK_DAYS = 7
 
 
 def assess_fund(
-    fund: Fund, as_of: str, data_client: DataClient, universe: list[str],
+    fund: Fund,
+    as_of: str,
+    data_client: DataClient,
+    universe: list[str],
+    allocator: Allocator | None = None,
+    equity: float = 1.0,
 ) -> DecisionRecord:
-    """Construct validated target weights using only the assessment cutoff."""
+    """Construct validated target weights using only the assessment cutoff.
+
+    Capital slices come from the CIO (`allocator`, or `fund.allocator`):
+    strategy performance / risk / mandate context -> weights across
+    strategies. The default StaticAllocator reproduces the mandate's static
+    ``weight / sum(weights)`` math bit for bit.
+
+    `equity` is the book those slices size against. Assessment is deliberately
+    broker-free, so it defaults to a normalized 1.0: the shipped policies
+    (static, equal-weight) read only `spec_weight`. A size-aware CIO that
+    needs a real book must be handed one by a caller that has it rather than
+    have this function invent a number.
+    """
     if as_of > completed_through():
         raise ValueError(f"assessment {as_of} requires incomplete daily data")
     spec = fund.spec.model_copy(deep=True)
@@ -42,34 +82,49 @@ def assess_fund(
 
     tradeable = [t for t in universe if t in marks]
 
+    alloc = allocator if allocator is not None else fund.allocator
+    slices = require_slices(
+        alloc.allocate(AllocatorContext(
+            as_of=as_of,
+            equity=equity,
+            strategies=tuple(
+                StrategyAllocationView(name=s.name, spec_weight=s.weight)
+                for s, _ in fund.strategies
+            ),
+        )),
+        [s.name for s, _ in fund.strategies],
+    )
+
     # Each strategy runs its own analysts and blends its own sleeve; the fund
     # nets the sleeves by capital slice. A persona staffed into two strategies
     # is asked twice, but the second ask is a prompt-cache hit, not spend.
-    total_slice = sum(s.weight for s, _ in fund.strategies)
     strategy_records: list[StrategyRecord] = []
+    dropped: list[DroppedOutput] = []
     netted: dict[str, float] = {t: 0.0 for t in tradeable}
-    for strategy, staff in fund.strategies:
-        signals: list[Signal] = []
-        for ticker in tradeable:
-            for model in staff:
-                signals.append(model.predict(ticker, as_of, data_client))
-        blend = blend_signals(
-            signals, strategy.model_weights, strategy.blend.gross_target,
-            mode=strategy.blend.mode,
-            investment_approaches={m.name: get_investment_approach(m.name) for m in strategy.models},
-        )
-        slice_ = strategy.weight / total_slice
-        for ticker, weight in blend.weights.items():
-            netted[ticker] += slice_ * weight
-        strategy_records.append(StrategyRecord(
-            name=strategy.name,
-            slice=slice_,
-            signals=signals,
-            convictions=blend.convictions,
-            weights=blend.weights,
-            eligible_scores=blend.eligible_scores,
-            flat_reason=blend.flat_reason,
-        ))
+    with SnapshotCache():
+        for strategy, staff in fund.strategies:
+            signals: list[Signal] = []
+            for ticker in tradeable:
+                for model in staff:
+                    signals.append(model.predict(ticker, as_of, data_client))
+            dropped.extend(_dropped_outputs(signals, strategy.name))
+            blend = blend_signals(
+                signals, strategy.model_weights, strategy.blend.gross_target,
+                mode=strategy.blend.mode,
+                investment_approaches={m.name: get_investment_approach(m.name) for m in strategy.models},
+            )
+            slice_ = slices[strategy.name]
+            for ticker, weight in blend.weights.items():
+                netted[ticker] += slice_ * weight
+            strategy_records.append(StrategyRecord(
+                name=strategy.name,
+                slice=slice_,
+                signals=signals,
+                convictions=blend.convictions,
+                weights=blend.weights,
+                eligible_scores=blend.eligible_scores,
+                flat_reason=blend.flat_reason,
+            ))
 
     preserve_proportions = any(s.blend.mode == "dollar_neutral" for s in spec.strategies)
     risk = apply_limits(netted, spec.risk, preserve_proportions=preserve_proportions)
@@ -83,13 +138,14 @@ def assess_fund(
             ticker: record.slice * weight * multipliers[ticker]
             for ticker, weight in record.weights.items()
         }
-    validate_targets(spec, strategy_records, risk.weights)
+    validate_targets(spec, strategy_records, risk.weights, slices=slices)
 
     return DecisionRecord(
         fund=spec.name, as_of=as_of, spec=spec, universe=universe,
         marks=marks, skipped=skipped, strategies=strategy_records,
         target_weights=netted, clamps=risk.clamps,
         risk_scale_factor=risk.scale_factor, final_weights=risk.weights,
+        dropped=dropped,
     )
 
 
@@ -113,6 +169,7 @@ def exact_marks(tickers: list[str], session: str, data_client: DataClient) -> di
 def execute_decision(
     fund: Fund, original: DecisionRecord, session: str,
     broker: Broker, data_client: DataClient,
+    allocator: Allocator | None = None,
 ) -> CycleRecord:
     """Refresh views before sizing a complete rebalance at exact closing prices."""
     if session <= original.as_of or session > completed_through():
@@ -121,10 +178,16 @@ def execute_decision(
         raise ValueError("fund mandate changed after assessment; create a new assessment")
     cutoff = previous_day(session)
     effective = original if cutoff == original.as_of else assess_fund(
-        fund, cutoff, data_client, original.universe,
+        fund, cutoff, data_client, original.universe, allocator,
     )
     spec = effective.spec
-    validate_targets(spec, effective.strategies, effective.final_weights)
+    # The slices were pinned when the assessment was built (and validated
+    # there); re-validate the rest of the book against them rather than
+    # against the mandate's static split, which an allocator may override.
+    validate_targets(
+        spec, effective.strategies, effective.final_weights,
+        slices={s.name: s.slice for s in effective.strategies},
+    )
     held = broker.positions()
     targets = {t: w for t, w in effective.final_weights.items() if w != 0}
     marks = exact_marks(list(set(held) | set(targets)), session, data_client)
@@ -162,10 +225,11 @@ def execute_decision(
 def run_cycle(
     fund: Fund, as_of: str, broker: Broker, data_client: DataClient,
     universe: list[str],
+    allocator: Allocator | None = None,
 ) -> CycleRecord | PendingRunResult:
     """Assess at the effective cutoff and execute only on a later completed session."""
     as_of = min(_date.fromisoformat(as_of).isoformat(), completed_through())
-    proposal = assess_fund(fund, as_of, data_client, universe)
+    proposal = assess_fund(fund, as_of, data_client, universe, allocator)
     start = (_date.fromisoformat(as_of) + timedelta(days=1)).isoformat()
     closes = session_closes(data_client, fund.spec.benchmark, start, completed_through())
     if not closes:
@@ -173,7 +237,7 @@ def run_cycle(
             fund=fund.spec.name, as_of=as_of, proposal=proposal,
             reason="No subsequent completed benchmark session is available. Run again explicitly when data is available.",
         )
-    return execute_decision(fund, proposal, min(closes), broker, data_client)
+    return execute_decision(fund, proposal, min(closes), broker, data_client, allocator)
 
 
 # ---------------------------------------------------------------------------
@@ -204,3 +268,26 @@ def _mark_prices(
             ))
 
     return marks, skipped
+
+
+def _dropped_outputs(signals: list[Signal], strategy: str) -> list[DroppedOutput]:
+    """Views blend_signals will ignore — recorded so the omit is visible."""
+    dropped: list[DroppedOutput] = []
+    for signal in signals:
+        if signal.metadata.get("abstained") is not True:
+            continue
+        reason = signal.metadata.get("abstain_reason")
+        if not reason:
+            text = signal.reasoning or "abstained"
+            reason = (
+                text.removeprefix("abstained: ").strip()
+                if text.startswith("abstained:")
+                else text
+            )
+        dropped.append(DroppedOutput(
+            ticker=signal.ticker,
+            model=signal.model_name,
+            strategy=strategy,
+            reason=reason,
+        ))
+    return dropped
