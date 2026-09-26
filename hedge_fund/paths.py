@@ -16,15 +16,29 @@ anchors its paths here, and nothing here may import them back.
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
-USER_DIR = Path.home() / ".hedge-fund"
+
+def _user_dir() -> Path:
+    """Where user data lives. ``HEDGE_FUND_HOME`` overrides it wholesale.
+
+    One variable so a test run, a container, or a second account can redirect
+    mandates, receipts, caches, the journal, observability and the kill-switch
+    together — nothing is written outside whatever this returns.
+    """
+    override = os.environ.get("HEDGE_FUND_HOME")
+    return Path(override).expanduser() if override else Path.home() / ".hedge-fund"
+
+
+USER_DIR = _user_dir()
 MANDATES_DIR = USER_DIR / "mandates"
 CACHE_DIR = USER_DIR / "cache"
 OBSERVABILITY_DIR = USER_DIR / "observability"
 ENV_PATH = USER_DIR / ".env"
 TICKS_DIR = USER_DIR / "ticks"
+JOURNAL_DIR = USER_DIR / "journal"
 KILL_SWITCH_PATH = USER_DIR / "KILL"
 
 # The example mandate ships inside the package; it is copied out (never read
@@ -38,6 +52,17 @@ def ensure_mandates_dir() -> Path:
         MANDATES_DIR.mkdir(parents=True)
         shutil.copy(EXAMPLE_MANDATE, MANDATES_DIR / "example.yaml")
     return MANDATES_DIR
+
+
+def journal_path(fund_name: str) -> Path:
+    """Append-only order journal for one fund.
+
+    Per fund rather than per session: the point is to survive an interrupted
+    run, and appending across runs is what makes it an audit log. Each event
+    carries its session.
+    """
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in fund_name) or "fund"
+    return JOURNAL_DIR / f"{safe}.jsonl"
 
 
 def default_events_path() -> Path:

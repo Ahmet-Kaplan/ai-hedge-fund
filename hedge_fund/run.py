@@ -54,9 +54,10 @@ from rich.console import Console
 from hedge_fund.backtesting import backtest_fund
 from hedge_fund.data import CachedDataClient, FDClient
 from hedge_fund.fund import ALLOCATOR_NAMES, Fund, load_spec, normalize_universe
+from hedge_fund.journal import FileOrderJournal, JournalledBroker, journal_summary
 from hedge_fund.ledger import broker_for_run, save_cycle_record
 from hedge_fund.observability import CycleObserver, observe_cycle
-from hedge_fund.paths import ensure_mandates_dir
+from hedge_fund.paths import ensure_mandates_dir, journal_path
 from hedge_fund.pipeline.models import PendingRunResult
 from hedge_fund.tui.keys import apply_credentials
 from hedge_fund.tui.shared import _BACKTEST_WEEKS
@@ -194,6 +195,12 @@ def main() -> None:
 
     receipts = ensure_mandates_dir()
     broker, prior = broker_for_run(spec.name, spec.capital, receipts)
+    # Journal every submission: the pipeline only writes a receipt once the
+    # whole loop has filled, so without this a crash mid-execution would lose
+    # the fills that already happened at the venue. `session` here is the
+    # run's as-of date — the executed session lands in the receipt.
+    journal = FileOrderJournal(journal_path(spec.name))
+    broker = JournalledBroker(broker, journal, fund=spec.name, session=args.date)
     console.print("[dim]paper venue · live clock · fills at mark[/]")
     if prior is not None:
         console.print(
@@ -254,6 +261,12 @@ def main() -> None:
             + "[/]"
         )
     console.print(f"[dim]saved {receipt}[/]")
+    counts = journal_summary(journal.entries())["by_event"]
+    if counts:
+        console.print(
+            f"[dim]orders journaled: {counts.get('fill', 0)} filled, "
+            f"{counts.get('error', 0)} errored  ·  {journal.path}[/]"
+        )
 
 
 if __name__ == "__main__":
