@@ -154,3 +154,44 @@ def test_place_order_is_open_and_fill_at_mark():
     assert fill.price == 100.0
     assert broker.open_orders() == {}
     assert broker.positions()["MSFT"].shares == 2
+
+
+# ---------------------------------------------------------------------------
+# Idempotency — a retried instruction must not move the book twice
+# ---------------------------------------------------------------------------
+
+def test_place_order_with_the_same_client_order_id_fills_once():
+    broker = PaperBroker(cash=10_000.0)
+    order = Order(ticker="AAPL", side="buy", quantity=5, price=100.0,
+                  client_order_id="desk-2025-01-10-000-b-abc123")
+
+    first = broker.place_order(order)
+    cash_after_first = broker.cash()
+    shares_after_first = broker.positions()["AAPL"].shares
+
+    second = broker.place_order(order)
+
+    assert second == first
+    assert broker.cash() == cash_after_first
+    assert broker.positions()["AAPL"].shares == shares_after_first
+    assert broker.receipts()["desk-2025-01-10-000-b-abc123"] == first
+
+
+def test_open_order_is_idempotent_by_client_order_id():
+    broker = PaperBroker(cash=10_000.0)
+    order = Order(ticker="AAPL", side="buy", quantity=1, price=100.0,
+                  client_order_id="cid-1")
+
+    assert broker.open_order(order) == broker.open_order(order)
+    assert len(broker.open_orders()) == 1
+
+
+def test_orders_without_a_client_id_still_fill_every_time():
+    """The id is the caller's opt-in; absent one, behaviour is unchanged."""
+    broker = PaperBroker(cash=10_000.0)
+    order = Order(ticker="AAPL", side="buy", quantity=1, price=100.0)
+
+    broker.place_order(order)
+    broker.place_order(order)
+
+    assert broker.positions()["AAPL"].shares == 2

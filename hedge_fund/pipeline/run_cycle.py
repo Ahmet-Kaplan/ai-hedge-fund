@@ -34,7 +34,7 @@ from hedge_fund.fund.allocator import (
     require_slices,
 )
 from hedge_fund.models import Signal
-from hedge_fund.pipeline.execution import build_orders
+from hedge_fund.pipeline.execution import build_orders, stamp_client_order_ids
 from hedge_fund.pipeline.models import (
     CycleRecord,
     DecisionRecord,
@@ -195,7 +195,11 @@ def execute_decision(
     equity_before = cash_before + sum(p.shares * marks[t] for t, p in held.items())
     if not isfinite(equity_before) or equity_before <= 0:
         raise ValueError(f"{spec.name}: equity on {session} must be finite and positive")
-    orders = build_orders(targets, held, marks, equity_before)
+    # Deterministic per-order ids so a retry after an ambiguous failure (a
+    # crash, a timeout with the venue) cannot place the same order twice.
+    orders = stamp_client_order_ids(
+        spec.name, session, build_orders(targets, held, marks, equity_before),
+    )
     projected = {t: p.shares for t, p in held.items()}
     for order in orders:
         projected[order.ticker] = projected.get(order.ticker, 0) + (

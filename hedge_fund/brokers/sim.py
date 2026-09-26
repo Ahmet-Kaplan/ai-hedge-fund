@@ -39,6 +39,9 @@ class SimBroker:
             for ticker, shares in (positions or {}).items()
             if shares != 0
         }
+        # client_order_id -> Fill. Replayed instructions return the original
+        # fill instead of moving the book twice.
+        self._receipts: dict[str, Fill] = {}
 
     def positions(self) -> dict[str, Position]:
         return {
@@ -57,6 +60,10 @@ class SimBroker:
                 "the caller must price every order"
             )
 
+        cid = order.client_order_id
+        if cid is not None and cid in self._receipts:
+            return self._receipts[cid]
+
         if order.side == "buy":
             self._shares[order.ticker] = self._shares.get(order.ticker, 0) + order.quantity
             self._cash -= order.quantity * order.price
@@ -67,9 +74,16 @@ class SimBroker:
         if self._shares[order.ticker] == 0:
             del self._shares[order.ticker]
 
-        return Fill(
+        fill = Fill(
             ticker=order.ticker,
             side=order.side,
             quantity=order.quantity,
             price=order.price,
         )
+        if cid is not None:
+            self._receipts[cid] = fill
+        return fill
+
+    def receipts(self) -> dict[str, Fill]:
+        """client_order_id -> Fill for everything this broker has executed."""
+        return dict(self._receipts)

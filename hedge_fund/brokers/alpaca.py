@@ -48,6 +48,18 @@ _FALSE = {"0", "false", "no", "off", ""}
 DEFAULT_FILL_TIMEOUT_SECONDS = 15.0
 DEFAULT_POLL_INTERVAL_SECONDS = 0.25
 
+# How long a market-open answer is reused. Orders arrive in bursts, and the
+# answer cannot change mid-burst in any way that matters.
+_CLOCK_TTL_SECONDS = 5.0
+
+# Alpaca's error code for a client_order_id that is already in use.
+_DUPLICATE_CLIENT_ORDER_ID = "40010001"
+
+
+def _is_duplicate_client_order_id(exc: Exception) -> bool:
+    text = f"{exc}"
+    return _DUPLICATE_CLIENT_ORDER_ID in text or "client_order_id must be unique" in text
+
 
 class AlpacaOrderError(RuntimeError):
     """An order did not reach a complete fill.
@@ -90,6 +102,7 @@ class AlpacaSettings:
     paper: bool = True
     trading_enabled: bool = False
     live_confirmed: bool = False
+    allow_closed_market: bool = False
     fill_timeout_seconds: float = DEFAULT_FILL_TIMEOUT_SECONDS
     poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS
 
@@ -116,6 +129,9 @@ class AlpacaSettings:
             paper=_parse_bool(os.environ.get("ALPACA_PAPER"), default=True),
             trading_enabled=_parse_bool(os.environ.get("ALPACA_TRADING_ENABLED"), default=False),
             live_confirmed=_parse_bool(os.environ.get("ALPACA_LIVE_TRADING_CONFIRMED"), default=False),
+            allow_closed_market=_parse_bool(
+                os.environ.get("ALPACA_ALLOW_CLOSED_MARKET"), default=False
+            ),
         )
         return replace(settings, **overrides) if overrides else settings
 
@@ -179,6 +195,8 @@ class AlpacaBroker:
         self._client = client if client is not None else _make_trading_client(self._settings)
         self._sleep = sleep
         self._monotonic = monotonic
+        self._clock_cache: bool | None = None
+        self._clock_cached_at = float("-inf")
 
     # ------------------------------------------------------------------
     # Introspection
@@ -220,6 +238,7 @@ class AlpacaBroker:
         fill within the timeout, or if trading is gated off.
         """
         self._settings.check_can_trade()
+        self._refuse_outside_market_hours(order)
 
         account = self._client.get_account()
         if bool(getattr(account, "account_blocked", False)) or bool(getattr(account, "trading_blocked", False)):
@@ -229,18 +248,25 @@ class AlpacaBroker:
         from alpaca.trading.requests import MarketOrderRequest
 
         side = OrderSide.BUY if order.side == "buy" else OrderSide.SELL
+        # Pass the caller's deterministic id so the venue dedupes a retry:
+        # resubmitting the same id returns the original order instead of
+        # creating a second one.
         request = MarketOrderRequest(
             symbol=order.ticker.upper(),
             qty=order.quantity,
             side=side,
             time_in_force=TimeInForce.DAY,
+            client_order_id=order.client_order_id,
         )
         try:
             submitted = self._client.submit_order(request)
-        except Exception as exc:  # venue rejection (closed market, no short permission, ...)
-            raise AlpacaOrderError(
-                f"{self.venue}: {order.side} {order.quantity} {order.ticker} rejected: {exc}"
-            ) from exc
+        except Exception as exc:
+            adopted = self._adopt_existing_on_duplicate(order, exc)
+            if adopted is None:
+                raise AlpacaOrderError(
+                    f"{self.venue}: {order.side} {order.quantity} {order.ticker} rejected: {exc}"
+                ) from exc
+            submitted = adopted
 
         order_id = str(getattr(submitted, "id", "") or "") or None
         filled = self._await_fill(order_id, order, submitted)
@@ -288,6 +314,57 @@ class AlpacaBroker:
     # ------------------------------------------------------------------
     # Private
     # ------------------------------------------------------------------
+
+    def _refuse_outside_market_hours(self, order: Order) -> None:
+        """Do not queue orders for a session that has not opened.
+
+        A market order submitted while the venue is closed is ACCEPTED and
+        parked until the next open (verified against the paper API). The
+        pipeline assumes a synchronous fill: it reads positions back straight
+        away, so a parked order would leave the book unchanged and the next
+        cycle would re-issue the same trade under a fresh session id — a
+        double execution. Refusing is the only honest option.
+        """
+        if self._settings.allow_closed_market:
+            return
+        if not self._market_is_open_cached():
+            clock = self.clock()
+            raise AlpacaOrderError(
+                f"{self.venue}: refusing to submit {order.side} {order.quantity} "
+                f"{order.ticker} while the market is closed (next open {clock['next_open']}); "
+                "a parked order would be re-issued by the next cycle. "
+                "Set ALPACA_ALLOW_CLOSED_MARKET=1 to queue it deliberately."
+            )
+
+    def _market_is_open_cached(self) -> bool:
+        """is_market_open with a short TTL: one clock call per burst of orders."""
+        now = self._monotonic()
+        if self._clock_cache is None or (now - self._clock_cached_at) > _CLOCK_TTL_SECONDS:
+            self._clock_cache = self.is_market_open()
+            self._clock_cached_at = now
+        return self._clock_cache
+
+    def _adopt_existing_on_duplicate(self, order: Order, exc: Exception) -> Any | None:
+        """Resolve a duplicate client_order_id to the order it collided with.
+
+        Alpaca does not hand back the original order on a duplicate submit —
+        it rejects the second one with 40010001 "client_order_id must be
+        unique". That is already safe (no second order is created), but a
+        retry should *succeed* against the original instruction, so look it up
+        and carry on polling it.
+        """
+        cid = order.client_order_id
+        if not cid or not _is_duplicate_client_order_id(exc):
+            return None
+        try:
+            existing = self._client.get_order_by_client_id(cid)
+        except Exception:  # cannot resolve -> let the caller see the rejection
+            return None
+        logger.info(
+            "%s: adopted existing order %s for client_order_id %s",
+            self.venue, getattr(existing, "id", "?"), cid,
+        )
+        return existing
 
     def _await_fill(self, order_id: str | None, order: Order, submitted: Any) -> Fill:
         """Poll until the order is completely filled, or raise."""

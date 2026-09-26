@@ -68,3 +68,16 @@ def test_seeded_constructor_opens_the_given_book():
     }
     seed["AAPL"] = 1
     assert broker.positions()["AAPL"].shares == 100
+
+
+def test_sim_place_order_is_idempotent_by_client_order_id():
+    broker = SimBroker(cash=10_000.0)
+    order = Order(ticker="AAPL", side="buy", quantity=4, price=50.0,
+                  client_order_id="cid-sim-1")
+
+    first = broker.place_order(order)
+    second = broker.place_order(order)
+
+    assert second == first
+    assert broker.positions()["AAPL"].shares == 4
+    assert broker.cash() == 9_800.0

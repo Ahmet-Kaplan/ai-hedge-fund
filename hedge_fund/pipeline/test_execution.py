@@ -1,7 +1,7 @@
 """build_orders tests — pure diffing math."""
 
-from hedge_fund.brokers.models import Position
-from hedge_fund.pipeline.execution import build_orders
+from hedge_fund.brokers.models import Order, Position
+from hedge_fund.pipeline.execution import build_orders, stamp_client_order_ids
 
 
 def _positions(**shares):
@@ -54,3 +54,55 @@ def test_short_target_sells_past_zero():
     assert len(orders) == 1
     assert orders[0].side == "sell"
     assert orders[0].quantity == 20
+
+
+# ---------------------------------------------------------------------------
+# Deterministic client order ids — what makes a retry safe
+# ---------------------------------------------------------------------------
+
+def _orders():
+    return [
+        Order(ticker="AAPL", side="sell", quantity=3, price=100.0),
+        Order(ticker="BRK.B", side="buy", quantity=1, price=400.0),
+    ]
+
+
+def test_stamp_is_deterministic_and_positional():
+    """Same inputs -> same ids, so a replay cannot place a second order."""
+    first = stamp_client_order_ids("desk", "2025-01-10", _orders())
+    second = stamp_client_order_ids("desk", "2025-01-10", _orders())
+
+    assert [o.client_order_id for o in first] == [o.client_order_id for o in second]
+    assert first[0].quantity == 3 and first[1].ticker == "BRK.B"  # untouched otherwise
+
+
+def test_stamp_distinguishes_fund_session_and_side():
+    base = stamp_client_order_ids("desk", "2025-01-10", _orders())[0].client_order_id
+
+    assert stamp_client_order_ids("other", "2025-01-10", _orders())[0].client_order_id != base
+    assert stamp_client_order_ids("desk", "2025-01-11", _orders())[0].client_order_id != base
+    # A reversed direction on the same name is a different instruction.
+    flipped = [Order(ticker="AAPL", side="buy", quantity=3, price=100.0)]
+    assert stamp_client_order_ids("desk", "2025-01-10", flipped)[0].client_order_id != base
+
+
+def test_ids_are_venue_safe_and_bounded():
+    """Alpaca caps client_order_id at 48 characters."""
+    long_fund = "a-very-long-mandate-name-that-would-blow-the-limit"
+    orders = [Order(ticker="BRK.B", side="buy", quantity=1, price=400.0)]
+
+    for o in stamp_client_order_ids(long_fund, "2025-01-10", orders):
+        cid = o.client_order_id
+        assert cid is not None
+        assert 0 < len(cid) <= 48
+        assert all(c.isalnum() or c == "-" for c in cid), cid
+
+
+def test_ids_are_unique_within_a_session():
+    orders = [
+        Order(ticker="AAPL", side="buy", quantity=1, price=10.0),
+        Order(ticker="AAPL", side="sell", quantity=1, price=10.0),
+        Order(ticker="MSFT", side="buy", quantity=1, price=10.0),
+    ]
+    ids = [o.client_order_id for o in stamp_client_order_ids("d", "2025-01-10", orders)]
+    assert len(set(ids)) == 3

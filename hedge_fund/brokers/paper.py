@@ -39,6 +39,11 @@ class PaperBroker:
         self._filled: set[str] = set()
         self._cancelled: set[str] = set()
         self._next_id = 1
+        # client_order_id -> what we already did with it. A caller that
+        # retries an ambiguous execution gets the original outcome instead of
+        # a second fill.
+        self._receipts: dict[str, Fill] = {}
+        self._client_ids: dict[str, str] = {}
 
     def positions(self) -> dict[str, Position]:
         return {
@@ -59,11 +64,18 @@ class PaperBroker:
 
         The order is copied onto the book. A non-positive mark is rejected
         here — the caller must price every ticket, same as place_order.
+
+        Idempotent by `client_order_id`: re-opening an instruction that is
+        already on the book returns its original ticket instead of a second.
         """
         self._require_price(order)
+        if order.client_order_id is not None and order.client_order_id in self._client_ids:
+            return self._client_ids[order.client_order_id]
         oid = str(self._next_id)
         self._next_id += 1
         self._open[oid] = order.model_copy()
+        if order.client_order_id is not None:
+            self._client_ids[order.client_order_id] = oid
         return oid
 
     def fill(self, order_id: str, price: float | None = None) -> Fill:
@@ -90,9 +102,19 @@ class PaperBroker:
         self._cancelled.add(order_id)
 
     def place_order(self, order: Order) -> Fill:
-        """Broker protocol: open and fill at the order's mark immediately."""
+        """Broker protocol: open and fill at the order's mark immediately.
+
+        Idempotent by `client_order_id`: replaying the same instruction
+        returns the first Fill and does not move the book again.
+        """
+        cid = order.client_order_id
+        if cid is not None and cid in self._receipts:
+            return self._receipts[cid]
         oid = self.open_order(order)
-        return self.fill(oid)
+        fill = self.fill(oid)
+        if cid is not None:
+            self._receipts[cid] = fill
+        return fill
 
     def _take_open(self, order_id: str, *, action: str) -> Order:
         order = self._open.pop(order_id, None)
@@ -112,6 +134,10 @@ class PaperBroker:
                 f"cannot fill {order.ticker} at price {order.price} — "
                 "the caller must price every order"
             )
+
+    def receipts(self) -> dict[str, Fill]:
+        """client_order_id -> Fill for everything this broker has executed."""
+        return dict(self._receipts)
 
     def _apply(self, ticker: str, side: str, quantity: int, price: float) -> Fill:
         if side == "buy":

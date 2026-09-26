@@ -23,12 +23,20 @@ class Order(BaseModel):
     """An instruction to trade. `price` is the reference price the caller
     computed (the as-of close): SimBroker and PaperBroker fill at that mark
     (PaperBroker may delay the fill), a live broker fills at its own quote —
-    the Fill always carries the truth."""
+    the Fill always carries the truth.
+
+    `client_order_id` is the caller's deterministic id for this instruction
+    (see `hedge_fund.pipeline.execution.stamp_client_order_ids`). A venue that
+    supports it returns the *existing* order instead of creating a second one,
+    which is what makes a retry after an ambiguous failure safe. Venues that
+    ignore it still honour the id in-process (`PaperBroker`, `SimBroker`).
+    """
 
     ticker: str
     side: Literal["buy", "sell"]
     quantity: int = Field(gt=0)
     price: float
+    client_order_id: str | None = None
 
 
 class Fill(BaseModel):

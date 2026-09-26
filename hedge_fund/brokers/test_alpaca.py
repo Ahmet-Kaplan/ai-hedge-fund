@@ -41,6 +41,13 @@ class _RawAccount:
 
 
 @dataclass
+class _RawClock:
+    is_open: bool = True
+    next_open: object = None
+    next_close: object = None
+
+
+@dataclass
 class _RawOrder:
     id: str
     status: str
@@ -51,10 +58,13 @@ class _RawOrder:
 class FakeClient:
     """Stands in for alpaca-py's TradingClient."""
 
-    def __init__(self, *, positions=None, account=None, order_script=None):
+    def __init__(self, *, positions=None, account=None, order_script=None,
+                 clock_open=True, by_client_id=None):
         self._positions = positions if positions is not None else []
         self._account = account or _RawAccount()
         self._script = list(order_script or [])
+        self._clock_open = clock_open
+        self._by_client_id = by_client_id
         self.submitted = []
         self.polled = []
 
@@ -77,7 +87,12 @@ class FakeClient:
         return self._script.pop(0)
 
     def get_clock(self):
-        raise AssertionError("clock not stubbed")
+        return _RawClock(is_open=self._clock_open)
+
+    def get_order_by_client_id(self, client_order_id):
+        if self._by_client_id is None:
+            raise AssertionError(f"no order registered for {client_order_id}")
+        return self._by_client_id
 
 
 def _settings(**over):
@@ -332,3 +347,89 @@ def test_live_order_round_trip_is_opt_in():
         broker.place_order(Order(ticker=ticker, side="sell", quantity=1, price=0.0))
     finally:
         broker.cancel_all_orders()
+
+
+def test_client_order_id_is_forwarded_to_the_venue():
+    """The venue, not this adapter, is what makes a retry idempotent."""
+    pytest.importorskip("alpaca")
+    client = FakeClient(order_script=[
+        _RawOrder("ord-9", "accepted", "0", None),
+        _RawOrder("ord-9", "filled", "2", "50.0"),
+    ])
+
+    _broker(client).place_order(
+        Order(ticker="AAPL", side="buy", quantity=2, price=50.0,
+              client_order_id="desk-2025-01-10-000-b-deadbeef")
+    )
+
+    assert client.submitted[0].client_order_id == "desk-2025-01-10-000-b-deadbeef"
+
+
+# ---------------------------------------------------------------------------
+# Closed market: a parked order would be re-issued by the next cycle
+# ---------------------------------------------------------------------------
+
+def test_closed_market_refuses_instead_of_parking_an_order():
+    """Verified against the paper API: a closed-market order is ACCEPTED and
+    parked, while the pipeline reads positions back immediately — so the next
+    cycle would re-issue the same trade under a new session id."""
+    pytest.importorskip("alpaca")
+    client = FakeClient(clock_open=False)
+
+    with pytest.raises(AlpacaOrderError, match="market is closed"):
+        _broker(client).place_order(Order(ticker="AAPL", side="buy", quantity=1, price=100.0))
+
+    assert client.submitted == []
+
+
+def test_closed_market_can_be_overridden_deliberately():
+    pytest.importorskip("alpaca")
+    client = FakeClient(clock_open=False, order_script=[
+        _RawOrder("ord-c", "accepted", "0", None),
+        _RawOrder("ord-c", "filled", "1", "100.0"),
+    ])
+
+    fill = _broker(client, allow_closed_market=True).place_order(
+        Order(ticker="AAPL", side="buy", quantity=1, price=100.0)
+    )
+
+    assert fill.quantity == 1
+    assert len(client.submitted) == 1
+
+
+def test_duplicate_client_order_id_adopts_the_original_order():
+    """Alpaca rejects a duplicate with 40010001 rather than returning the
+    original; a retry must resolve to that order instead of failing."""
+    pytest.importorskip("alpaca")
+
+    class DuplicateRejecting(FakeClient):
+        def submit_order(self, request):
+            self.submitted.append(request)
+            raise RuntimeError(
+                '{"code":40010001,"message":"client_order_id must be unique"}'
+            )
+
+    adopted = _RawOrder("ord-orig", "accepted", "0", None)
+    client = DuplicateRejecting(by_client_id=adopted, order_script=[
+        _RawOrder("ord-orig", "filled", "2", "51.0"),
+    ])
+
+    fill = _broker(client).place_order(
+        Order(ticker="AAPL", side="buy", quantity=2, price=50.0, client_order_id="cid-dup")
+    )
+
+    assert fill.ticker == "AAPL"
+    assert fill.quantity == 2
+    assert fill.price == pytest.approx(51.0)
+
+
+def test_an_unrelated_submit_failure_is_still_an_error():
+    """Only a duplicate-id rejection is recoverable."""
+    pytest.importorskip("alpaca")
+
+    class Other(FakeClient):
+        def submit_order(self, request):
+            raise RuntimeError('{"code":40310000,"message":"insufficient buying power"}')
+
+    with pytest.raises(AlpacaOrderError, match="insufficient buying power"):
+        _broker(Other()).place_order(Order(ticker="AAPL", side="buy", quantity=1, price=1.0))
