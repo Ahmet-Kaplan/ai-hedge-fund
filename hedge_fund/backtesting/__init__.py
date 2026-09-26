@@ -11,7 +11,14 @@ from hedge_fund.backtesting.fund import (
     rebalance_grid,
     ReplaySchedule,
 )
-from hedge_fund.backtesting.models import BacktestResult, PerformanceMetrics, Trade
+from hedge_fund.backtesting.ledger import PortfolioLedger
+from hedge_fund.backtesting.models import (
+    BacktestResult,
+    PerformanceMetrics,
+    PortfolioLedgerEntry,
+    PositionSnapshot,
+    Trade,
+)
 
 __all__ = [
     "BacktestEngine",
@@ -20,6 +27,9 @@ __all__ = [
     "FundBacktestMetrics",
     "FundBacktestResult",
     "PerformanceMetrics",
+    "PortfolioLedger",
+    "PortfolioLedgerEntry",
+    "PositionSnapshot",
     "Trade",
     "ReplaySchedule",
     "backtest_fund",

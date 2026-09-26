@@ -311,3 +311,64 @@ def test_financial_metrics_parses_filing_metadata(client):
     assert m.filing_date == "2024-05-02"
     assert m.filing_datetime == "2024-05-02T16:31:00-04:00"
     assert m.report_period == "2024-03-30"
+
+
+# ---------------------------------------------------------------------------
+# Market cap
+# ---------------------------------------------------------------------------
+
+def _facts_payload(market_cap=None):
+    row = {"ticker": "AAPL", "name": "Apple Inc."}
+    if market_cap is not None:
+        row["market_cap"] = market_cap
+    return {"company_facts": row}
+
+
+def _metrics_payload(market_cap):
+    return {"financial_metrics": [{
+        "ticker": "AAPL", "report_period": "2024-03-31", "period": "ttm",
+        "filing_date": "2024-05-01", "market_cap": market_cap,
+    }]}
+
+
+def test_company_facts_keeps_market_cap(client):
+    """/company/facts sends market_cap; CompanyFacts must not drop it.
+
+    With extra="ignore" an undeclared field is discarded silently, which left
+    get_market_cap reading an attribute that did not exist.
+    """
+    _stub(client, [_FakeResponse(200, _facts_payload(3.0e12))])
+
+    facts = client.get_company_facts("AAPL")
+
+    assert facts is not None
+    assert facts.market_cap == 3.0e12
+
+
+def test_get_market_cap_prefers_company_facts(client):
+    """Facts win when present; the metrics row is the fallback."""
+    calls = _stub(client, [
+        _FakeResponse(200, _facts_payload(3.0e12)),
+        _FakeResponse(200, _metrics_payload(1.0)),
+    ])
+
+    assert client.get_market_cap("AAPL", "2024-06-30") == 3.0e12
+    assert len(calls) == 1  # metrics never fetched
+
+
+def test_get_market_cap_falls_back_to_metrics(client):
+    _stub(client, [
+        _FakeResponse(200, _facts_payload(None)),
+        _FakeResponse(200, _metrics_payload(2.5e12)),
+    ])
+
+    assert client.get_market_cap("AAPL", "2024-06-30") == 2.5e12
+
+
+def test_get_market_cap_returns_none_when_absent(client):
+    _stub(client, [
+        _FakeResponse(200, {"company_facts": None}),
+        _FakeResponse(200, {"financial_metrics": []}),
+    ])
+
+    assert client.get_market_cap("AAPL", "2024-06-30") is None

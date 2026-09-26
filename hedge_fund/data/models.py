@@ -165,6 +165,11 @@ class CompanyFacts(BaseModel):
     category: str | None = None
     exchange: str | None = None
     location: str | None = None
+    # Latest market cap as reported by /company/facts. Latest-only, so it is
+    # NOT point-in-time: build_snapshot deliberately reads the most recent
+    # filed metrics row instead. FDClient.get_market_cap prefers this field,
+    # which is why it must exist here rather than being dropped as extra.
+    market_cap: float | None = None
     sec_filings_url: str | None = None
     sic_code: str | None = None
     sic_industry: str | None = None
