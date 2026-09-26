@@ -1,0 +1,39 @@
+# Buffett baseline — the smallest honest configuration of the target system.
+#
+# One discretionary pod staffed only by the Buffett agent, long-only, rebalanced
+# monthly against SPY, $100k of simulated capital, no position above 15%.
+#
+# Safety properties, all enforced by the existing schema and pipeline:
+#   - long-only:   blend.mode long_only, and buffett declares investment_approach
+#                  long_only; validate_targets rejects any negative weight.
+#   - no leverage: max_gross_exposure 1.0 caps the sum of |weights| at equity.
+#   - simulated:   the CLI and backtester only construct SimBroker; there is no
+#                  live or paper broker in the codebase.
+#   - cash:        exposure removed by the 15% cap is NOT redistributed — it
+#                  stays in cash (risk/limits.py).
+#
+# A mandate never names tickers. Point it at the baseline universe
+# (configs/baseline-universe.yaml) with --tickers:
+#
+#   aihf configs/buffett-baseline.yaml --backtest --start 2025-01-01 --date 2026-08-31 \
+#     --tickers AAPL,MSFT,GOOGL,AMZN,META,BRK.B,JPM,KO,PG,JNJ,WMT,XOM,CVX,V,MA
+#
+schema_version: 2
+name: buffett-baseline
+strategies:
+  - name: buffett-value
+    display_name: Buffett Value
+    weight: 1.0
+    models:
+      - name: buffett
+        weight: 1.0
+    blend:
+      mode: long_only
+      method: conviction_weighted
+      gross_target: 1.0
+risk:
+  max_position_pct: 0.15
+  max_gross_exposure: 1.0
+capital: 100000
+rebalance: monthly
+benchmark: SPY

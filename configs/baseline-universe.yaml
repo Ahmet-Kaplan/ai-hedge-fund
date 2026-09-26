@@ -1,0 +1,26 @@
+# Phase 1 test universe — 15 large, long-listed US names.
+#
+# Chosen by hand today, so a backtest over it is survivorship-biased by
+# construction (every name here is a present-day survivor). It exists to
+# exercise the pipeline, not to measure skill. A point-in-time S&P 500
+# universe replaces it in a later phase.
+#
+# BRK.B: the provider's symbol format (BRK.B vs BRK-B) is unverified; run
+#   python -m hedge_fund.verification --universe-file configs/baseline-universe.yaml
+# to check coverage for every name before backtesting.
+tickers:
+  - AAPL
+  - MSFT
+  - GOOGL
+  - AMZN
+  - META
+  - BRK.B
+  - JPM
+  - KO
+  - PG
+  - JNJ
+  - WMT
+  - XOM
+  - CVX
+  - V
+  - MA
