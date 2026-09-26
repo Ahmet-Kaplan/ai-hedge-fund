@@ -45,6 +45,7 @@ from hedge_fund.pipeline.models import (
 )
 from hedge_fund.portfolio.construction import blend_signals, WEIGHT_TOLERANCE
 from hedge_fund.portfolio.validation import validate_targets
+from hedge_fund.reconciliation import LedgerReference, reconcile, require_settled
 from hedge_fund.risk.limits import apply_limits
 from hedge_fund.signals import get_investment_approach
 
@@ -170,8 +171,18 @@ def execute_decision(
     fund: Fund, original: DecisionRecord, session: str,
     broker: Broker, data_client: DataClient,
     allocator: Allocator | None = None,
+    reference: LedgerReference | None = None,
+    require_settled_broker: bool = True,
 ) -> CycleRecord:
-    """Refresh views before sizing a complete rebalance at exact closing prices."""
+    """Refresh views before sizing a complete rebalance at exact closing prices.
+
+    `reference` is the book the ledger believes the broker holds (the last
+    receipt). It is reconciled against reality and recorded on the result.
+
+    `require_settled_broker` refuses to trade while the venue still holds
+    unfilled orders: its positions do not include them yet, so sizing from
+    that book would re-issue the same trade as a second order.
+    """
     if session <= original.as_of or session > completed_through():
         raise ValueError(f"execution session {session} must follow {original.as_of} and be complete")
     if fund.spec != original.spec:
@@ -195,6 +206,16 @@ def execute_decision(
     equity_before = cash_before + sum(p.shares * marks[t] for t, p in held.items())
     if not isfinite(equity_before) or equity_before <= 0:
         raise ValueError(f"{spec.name}: equity on {session} must be finite and positive")
+    # Last gate before trading. A working order at the venue is a hard stop:
+    # its positions do not include that trade yet, so sizing from this book
+    # would re-issue it. Position drift is recorded and reported, not blocked
+    # — the broker is authoritative for sizing, the receipt just no longer
+    # describes the account. (Deliberately after the equity/limit guards, so
+    # a non-finite book still fails with the pipeline's own error.)
+    reconciliation = reconcile(broker, reference)
+    if require_settled_broker:
+        require_settled(reconciliation)
+
     # Deterministic per-order ids so a retry after an ambiguous failure (a
     # crash, a timeout with the venue) cannot place the same order twice.
     orders = stamp_client_order_ids(
@@ -223,6 +244,7 @@ def execute_decision(
         original_assessment=original.model_copy(deep=True),
         refreshed_assessment=effective.model_copy(deep=True),
         execution_as_of=session, execution_policy="next_close",
+        reconciliation=reconciliation,
     )
 
 
@@ -230,6 +252,8 @@ def run_cycle(
     fund: Fund, as_of: str, broker: Broker, data_client: DataClient,
     universe: list[str],
     allocator: Allocator | None = None,
+    reference: LedgerReference | None = None,
+    require_settled_broker: bool = True,
 ) -> CycleRecord | PendingRunResult:
     """Assess at the effective cutoff and execute only on a later completed session."""
     as_of = min(_date.fromisoformat(as_of).isoformat(), completed_through())
@@ -241,7 +265,10 @@ def run_cycle(
             fund=fund.spec.name, as_of=as_of, proposal=proposal,
             reason="No subsequent completed benchmark session is available. Run again explicitly when data is available.",
         )
-    return execute_decision(fund, proposal, min(closes), broker, data_client, allocator)
+    return execute_decision(
+        fund, proposal, min(closes), broker, data_client, allocator,
+        reference=reference, require_settled_broker=require_settled_broker,
+    )
 
 
 # ---------------------------------------------------------------------------

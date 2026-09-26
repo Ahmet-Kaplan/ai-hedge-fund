@@ -59,6 +59,7 @@ from hedge_fund.ledger import broker_for_run, save_cycle_record
 from hedge_fund.observability import CycleObserver, observe_cycle
 from hedge_fund.paths import ensure_mandates_dir, journal_path
 from hedge_fund.pipeline.models import PendingRunResult
+from hedge_fund.reconciliation import LedgerReference
 from hedge_fund.tui.keys import apply_credentials
 from hedge_fund.tui.shared import _BACKTEST_WEEKS
 
@@ -222,8 +223,14 @@ def main() -> None:
                 events_path=args.events,
                 heartbeat_path=args.heartbeat,
             )
+            # The newest receipt is the ledger's claim about this account;
+            # reconcile it against the venue so drift and any order still
+            # working are visible before we trade on top of it.
             record = observe_cycle(
                 fund, args.date, broker, fd, universe, observer=observer,
+                reference=(
+                    LedgerReference.from_cycle_record(prior) if prior is not None else None
+                ),
             )
 
     receipt = save_cycle_record(record, receipts)
@@ -252,6 +259,9 @@ def main() -> None:
         f"{len(record.clamps)} risk clamps  ·  "
         f"{len(record.orders)} orders  ·  NAV ${record.nav:,.2f}"
     )
+    if record.reconciliation is not None:
+        tone = "yellow" if not record.reconciliation.clean else "dim"
+        console.print(f"[{tone}]reconciled: {record.reconciliation.summary}[/]")
     if record.skipped:
         console.print(f"[dim]skipped: {', '.join(s.ticker for s in record.skipped)}[/]")
     if record.dropped:

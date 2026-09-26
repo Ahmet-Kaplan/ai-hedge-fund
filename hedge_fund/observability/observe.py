@@ -280,6 +280,8 @@ class CycleObserver:
         universe: list[str],
         *,
         run_cycle_fn: Callable[..., CycleRecord | PendingRunResult] | None = None,
+        reference: Any = None,
+        require_settled_broker: bool = True,
     ) -> CycleRecord:
         """Run one cycle under this observer. Re-raises whatever the cycle raises."""
         cycle = run_cycle_fn or run_cycle
@@ -297,7 +299,14 @@ class CycleObserver:
         self.emit(CYCLE_START, start_payload)
         self.write_heartbeat(start_payload)
         try:
-            record = cycle(fund, as_of, broker, data_client, universe)
+            # Only forward the extra kwargs when they mean something: an
+            # injected run_cycle_fn may not accept them.
+            extra: dict[str, Any] = {}
+            if reference is not None:
+                extra["reference"] = reference
+            if require_settled_broker is not True:
+                extra["require_settled_broker"] = require_settled_broker
+            record = cycle(fund, as_of, broker, data_client, universe, **extra)
         except Exception as exc:
             failed = _iso(_utc_now())
             error_payload = {
@@ -346,11 +355,16 @@ def observe_cycle(
     *,
     observer: CycleObserver | None = None,
     run_cycle_fn: Callable[..., CycleRecord | PendingRunResult] | None = None,
+    reference: Any = None,
+    require_settled_broker: bool = True,
     events_path: str | Path | None = None,
     heartbeat_path: str | Path | None = None,
     webhook_url: str | None = None,
 ) -> CycleRecord | PendingRunResult:
     """Run ``run_cycle`` (or *run_cycle_fn*) with events / heartbeat / webhook.
+
+    *reference* is the book the ledger expects the broker to hold; the cycle
+    reconciles it against the venue and records the result.
 
     When *observer* is omitted, configuration comes from the keyword paths
     and ``HEDGE_FUND_*`` environment variables. Logging always happens.
@@ -362,4 +376,5 @@ def observe_cycle(
     )
     return obs.observe(
         fund, as_of, broker, data_client, universe, run_cycle_fn=run_cycle_fn,
+        reference=reference, require_settled_broker=require_settled_broker,
     )

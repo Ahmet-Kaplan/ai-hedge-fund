@@ -19,6 +19,7 @@ from hedge_fund.brokers.models import Fill, Order
 from hedge_fund.fund.spec import FundSpec
 from hedge_fund.models import Signal
 from hedge_fund.portfolio.construction import FlatReason
+from hedge_fund.reconciliation import ReconciliationReport
 from hedge_fund.risk.limits import ClampEvent
 
 
@@ -116,3 +117,6 @@ class CycleRecord(BaseModel):
     refreshed_assessment: DecisionRecord | None = None
     execution_as_of: str | None = None
     execution_policy: Literal["next_close"] | None = None
+    # What the broker held versus what the last receipt claimed, as of this
+    # execution. None when no reference was supplied.
+    reconciliation: "ReconciliationReport | None" = None
