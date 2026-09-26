@@ -137,6 +137,20 @@ def test_financial_metrics_filters_on_filing_date(client):
     assert "report_period_lte" not in params
 
 
+@pytest.mark.parametrize("requested,expected", [(100, 10), (11, 10), (10, 10), (3, 3), (0, 1)])
+def test_news_limit_is_clamped_to_the_endpoint_maximum(client, requested, expected):
+    """/news serves at most 10 per page; features.news asks for 100 by default.
+
+    The domain default is provider-agnostic on purpose, so the clamp belongs
+    at this boundary — otherwise the request is silently ignored or a 400.
+    """
+    calls = _stub(client, [_FakeResponse(200, {"news": []})])
+
+    client.get_news("AAPL", "2024-06-30", start_date="2024-06-01", limit=requested)
+
+    assert calls[0]["params"]["limit"] == expected
+
+
 # ---------------------------------------------------------------------------
 # Pagination contract
 # ---------------------------------------------------------------------------

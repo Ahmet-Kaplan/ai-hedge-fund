@@ -20,6 +20,13 @@ from hedge_fund.data.models import (
 
 logger = logging.getLogger(__name__)
 
+# Financial Datasets' /news endpoint documents a maximum page size of 10
+# (params: ticker, limit, cursor). Asking for more is at best ignored and at
+# worst a 400, so the request is clamped here rather than trusting callers —
+# the domain default (features.news.DEFAULT_NEWS_LIMIT) is deliberately
+# provider-agnostic and may exceed this.
+NEWS_MAX_LIMIT = 10
+
 
 def _require_api_key(api_key: str | None) -> str:
     """Return a usable Financial Datasets key, or fail with the variable to set.
@@ -198,7 +205,11 @@ class FDClient:
         endpoint; callers that derive sentiment from news must treat
         empty news as "no narrative input", not a zero signal from a
         failed fetch.
+
+        ``limit`` is clamped to :data:`NEWS_MAX_LIMIT`, the largest page
+        this endpoint serves.
         """
+        limit = max(1, min(int(limit), NEWS_MAX_LIMIT))
         params: dict = {"ticker": ticker, "end_date": end_date, "limit": limit}
         if start_date is not None:
             params["start_date"] = start_date
