@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, computed_field, Field
 
 from hedge_fund.brokers.account import AccountSnapshot, PositionDetail, account_snapshot
 from hedge_fund.reconciliation import ReconciliationReport, reconcile
@@ -46,11 +46,14 @@ class DeskSnapshot(BaseModel):
     working_orders: int = 0
     reconciliation: ReconciliationReport | None = None
 
+    @computed_field  # serialized: the web payload must carry it too
     @property
     def badge(self) -> str:
         """The one label an operator must not misread."""
         if self.live:
             return "LIVE"
+        if not self.trading_enabled:
+            return "READ-ONLY"
         return "PAPER"
 
     @property
@@ -58,6 +61,7 @@ class DeskSnapshot(BaseModel):
         """Whether the venue supplied prices, or only share counts."""
         return any(p.current_price is not None for p in self.positions)
 
+    @computed_field  # serialized: the web payload must carry it too
     @property
     def warnings(self) -> list[str]:
         """Everything an operator should look at before trusting the screen."""

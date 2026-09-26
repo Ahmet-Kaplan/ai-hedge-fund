@@ -158,6 +158,31 @@ inventing a fill. And a fractional position raises instead of being truncated,
 because `Position.shares` is an integer share count and rounding would desync
 the fund's books from the broker's.
 
+### Read-only dashboard
+
+A local web view of the same desk snapshot the TUI shows:
+
+```bash
+python -m hedge_fund.web                 # http://127.0.0.1:8765
+python -m hedge_fund.web --venue alpaca  # watch the Alpaca account
+```
+
+Needs the optional web dependencies (`pip install fastapi uvicorn`). It is
+deliberately narrow:
+
+- **It cannot trade.** Every route is a GET, and the broker behind the view is
+  wrapped so that `place_order` raises. There is no endpoint that submits, and
+  no static directory to serve from.
+- **Loopback only.** Binding anywhere else is refused unless you pass
+  `--allow-remote`, because the page is unencrypted and carries an account
+  token. `0.0.0.0` counts as remote — it is every interface, not loopback.
+- **Token required.** Taken from `HEDGE_FUND_WEB_TOKEN`, or generated and
+  printed at startup. Compared with `secrets.compare_digest`.
+
+`GET /api/desk` returns the snapshot as JSON and `GET /api/stream` is a
+server-sent-events feed of it, so a script can watch an account without a
+browser.
+
 ## Development
 
 This fork lives at [bugman666/ai-hedge-fund](https://github.com/bugman666/ai-hedge-fund). See [CONTRIBUTING.md](CONTRIBUTING.md) for the first-test / first-backtest path.
