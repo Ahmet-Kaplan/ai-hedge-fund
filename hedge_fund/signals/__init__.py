@@ -22,6 +22,7 @@ from hedge_fund.signals.news_analyst import NewsAnalystAgent
 from hedge_fund.signals.news_sentiment import NewsSentimentModel
 from hedge_fund.signals.pabrai import PabraiAgent
 from hedge_fund.signals.pead import PEADModel
+from hedge_fund.signals.ta_board import RATINGS_5_TIER, TradingAgentsBoard
 from hedge_fund.signals.taleb import TalebAgent
 from hedge_fund.signals.wood import WoodAgent
 
@@ -48,6 +49,8 @@ ALPHA_MODEL_REGISTRY: dict[str, type[AlphaModel]] = {
     "pabrai": PabraiAgent,
     "taleb": TalebAgent,
     "jhunjhunwala": JhunjhunwalaAgent,
+    # External research framework (optional dependency, no blind mode)
+    "ta_board": TradingAgentsBoard,
 }
 
 
@@ -88,6 +91,8 @@ __all__ = [
     "PabraiAgent",
     "TalebAgent",
     "JhunjhunwalaAgent",
+    "RATINGS_5_TIER",
+    "TradingAgentsBoard",
     "ALPHA_MODEL_REGISTRY",
     "get_investment_approach",
 ]

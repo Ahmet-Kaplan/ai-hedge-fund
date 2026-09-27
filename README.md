@@ -158,6 +158,55 @@ inventing a fill. And a fractional position raises instead of being truncated,
 because `Position.shares` is an integer share count and rounding would desync
 the fund's books from the broker's.
 
+### TradingAgents as an analyst (optional)
+
+[TradingAgents](https://github.com/TauricResearch/TradingAgents) runs a
+LangGraph of analysts, a bull/bear debate and a three-way risk debate, and
+returns a five-tier rating. `ta_board` turns that rating into a `Signal`, so
+the board can sit in a strategy beside the personas and the quant models:
+
+```yaml
+strategies:
+  - name: research
+    models:
+      - name: ta_board
+        params: {llm_provider: anthropic, deep_think_llm: claude-opus-5-5}
+    blend: {mode: long_short}
+```
+
+Install it from the repository — **not** from PyPI:
+
+```bash
+pip install git+https://github.com/TauricResearch/TradingAgents.git
+```
+
+A different project publishes itself on PyPI under the same name, so
+`pip install tradingagents` fetches the wrong code. The adapter checks the
+rating vocabulary it finds and refuses the impostor with an explanation.
+
+Rating map: `Buy +1.0 · Overweight +0.5 · Hold 0.0 · Underweight -0.5 · Sell -1.0`.
+`REVIEW` — the framework's "no readable decision" sentinel — abstains rather
+than counting as a Hold, so the record never shows a call nobody made.
+
+Three things to know before using it:
+
+- **It cannot be blinded.** The framework is handed the ticker and fetches its
+  own news, social and fundamentals, so a backtest could not hide the company
+  from it. `TradingAgentsBoard.supports_blind = False`, and `blind=True` refuses
+  to staff it instead of scoring recall as skill. Run it live, or leave it out
+  of the mandate you backtest.
+- **It bypasses this project's data contract.** Everything else reads a
+  point-in-time snapshot built through `DataClient`; this model does its own
+  fetching, and its social and news sources reflect *now* even for a historical
+  date. `Signal.metadata["data_source"]` records that, so the audit trail shows
+  which numbers came from outside the contract.
+- **It is expensive.** One call is a multi-agent graph with debate rounds.
+  Ratings are cached per (ticker, date, config fingerprint), so a replay is
+  free, but a first run costs several LLM calls per ticker.
+
+All of its artefacts (cache, logs, memory) are written under this project's
+cache directory rather than a second `~/.tradingagents`.
+
 ### Read-only dashboard
 
 A local web view of the same desk snapshot the TUI shows:

@@ -212,6 +212,26 @@ def custom_strategy(names: list[str]) -> StrategySpec:
     return StrategySpec(name="custom", models=models, blend=BlendPolicy(mode=mode))
 
 
+def _refuse_unblindeable(model: object, strategy: str, *, blind: bool) -> None:
+    """A backtest must not staff a model that cannot be blinded.
+
+    `blind=True` withholds the ticker, industry and dates so a model that
+    remembers the company cannot recall the outcome it is being scored on.
+    A model that needs the ticker handed to it cannot honour that, so the run
+    stops here instead of producing a number that means nothing.
+    """
+    if not blind:
+        return
+    cls = model if isinstance(model, type) else type(model)
+    if getattr(cls, "supports_blind", True):
+        return
+    raise ValueError(
+        f"model {cls.__name__} in strategy {strategy!r} cannot be blinded, so it "
+        "cannot run in a backtest: it is handed the ticker itself. Use it in a "
+        "live run, or replace it in this mandate for backtesting."
+    )
+
+
 class Fund:
     """A validated mandate with persistent model instances for each strategy.
 
@@ -242,6 +262,8 @@ class Fund:
         self.strategies: list[tuple[StrategySpec, list[AlphaModel]]] = []
         for strategy in spec.strategies:
             if models is not None:
+                for instance in models[strategy.name]:
+                    _refuse_unblindeable(instance, strategy.name, blind=blind)
                 self.strategies.append((strategy, models[strategy.name]))
                 continue
             staff = []
@@ -249,6 +271,7 @@ class Fund:
                 if m.name not in ALPHA_MODEL_REGISTRY:
                     raise ValueError(f"unknown model {m.name!r} in strategy " f"{strategy.name!r}; available: {sorted(ALPHA_MODEL_REGISTRY)}")
                 cls = ALPHA_MODEL_REGISTRY[m.name]
+                _refuse_unblindeable(cls, strategy.name, blind=blind)
                 params = {**m.params, "blind": True} if blind and issubclass(cls, LLMAgent) else m.params
                 staff.append(cls(**params))
             self.strategies.append((strategy, staff))

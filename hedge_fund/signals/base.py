@@ -22,6 +22,13 @@ class AlphaModel(ABC):
     # permission metadata, independent of its signed opinion or LLM prompt.
     investment_approach: ClassVar[InvestmentApproach]
 
+    # Whether a backtest can withhold the company's identity from this model.
+    # True for anything that reasons over the pipeline's point-in-time
+    # snapshots. A model that must be handed the ticker itself — an external
+    # research framework, say — sets this False, and Fund(blind=True) refuses
+    # to staff it rather than quietly leaking the answer it is being scored on.
+    supports_blind: ClassVar[bool] = True
+
     @property
     @abstractmethod
     def name(self) -> str:
