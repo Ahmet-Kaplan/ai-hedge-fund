@@ -207,6 +207,38 @@ Three things to know before using it:
 All of its artefacts (cache, logs, memory) are written under this project's
 cache directory rather than a second `~/.tradingagents`.
 
+### What a fill costs
+
+Backtests and paper runs charge the schedule a mandate declares, so a strategy
+is measured against what trading it actually costs:
+
+```yaml
+commission:
+  per_trade: 1.00   # flat charge per order
+  per_share: 0.005  # plus this much per share
+risk:
+  max_position_pct: 0.25
+  max_gross_exposure: 1.0
+  min_cash_reserve_pct: 0.10   # leave 10% in cash; caps NET exposure at 90%
+```
+
+Both default to zero, and a mandate that does not mention them backtests
+**bit-identically** to one from before either existed — the cost branch is
+skipped rather than applied with zeros.
+
+Commission is booked as a cash expense rather than folded into cost basis, so
+"what the position earned" and "what trading it cost" stay separable: every
+`Fill` carries its own `commission` and `realized_pnl`, and positions carry the
+weighted-average `cost_basis` they were bought at. Closing a position realizes
+against that basis; crossing zero in one order closes the old side and opens
+the new one at the fill price, rather than pricing a short off shares the book
+no longer holds.
+
+The one honest gap: a book seeded from a receipt knows its share counts but not
+what they cost. Closing such a position moves cash correctly and reports
+`realized_pnl: null` — "nobody can say what this trade made" is a different
+statement from "this trade made nothing", and the record keeps them apart.
+
 ### Read-only dashboard
 
 A local web view of the same desk snapshot the TUI shows:

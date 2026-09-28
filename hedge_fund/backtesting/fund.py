@@ -115,7 +115,7 @@ def backtest_fund(
     universe = normalize_universe(universe)
     schedule = build_schedule(data_client, spec.benchmark, start, end, spec.rebalance)
     dates = list(schedule.closes)
-    broker = SimBroker(cash=spec.capital)
+    broker = SimBroker(cash=spec.capital, commission=spec.commission)
     records: list[CycleRecord] = []
     pending: list[PendingRunResult] = []
     due: dict[str, DecisionRecord] = {}

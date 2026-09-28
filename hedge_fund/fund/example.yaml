@@ -30,6 +30,13 @@ strategies:
 risk:
   max_position_pct: 0.25      # master risk: no single name above 25% of equity
   max_gross_exposure: 1.0     # unlevered, across the netted book
+  # min_cash_reserve_pct: 0.1 # leave 10% in cash (caps NET exposure at 90%)
 capital: 100000
+# What a fill costs to execute, charged by SimBroker and PaperBroker. Both
+# default to zero, so leaving this out backtests exactly as it did before
+# costs existed. A live venue charges its own and reports it on the Fill.
+# commission:
+#   per_trade: 0.0            # flat charge per order
+#   per_share: 0.0            # plus this much per share
 rebalance: weekly             # daily | weekly | monthly — how often the fund trades
 benchmark: SPY                # measured against; also the backtest's trading-day grid

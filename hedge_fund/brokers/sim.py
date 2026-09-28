@@ -2,9 +2,13 @@
 
 Fills every order completely, exactly at the order's reference price. That
 determinism is the point: given the same orders, a backtest replays to the
-same book. Live-clock paper runs use PaperBroker (same bookkeeping, labeled
-paper, not a backtest clock). Slippage/costs are a declared future addition
-inside place_order, where they change fills without touching the pipeline.
+same book. Commissions are charged inside place_order, where they change fills
+without touching the pipeline; slippage stays a declared future addition in the
+same place.
+
+Bookkeeping — cash, signed shares, weighted-average cost basis, realized P&L —
+lives in `PositionBook`, shared with PaperBroker so the two offline venues
+cannot disagree about what a fill cost or what it earned.
 
 Margin is not modeled: cash may go negative and stays visible. With an
 unlevered mandate (gross_target <= 1), sells-before-buys ordering, and
@@ -16,11 +20,13 @@ from __future__ import annotations
 
 from math import isfinite
 
-from hedge_fund.brokers.models import Fill, Order, Position
+from hedge_fund.brokers.book import PositionBook
+from hedge_fund.brokers.models import Commission, Fill, Order, Position
 
 
 class SimBroker:
-    """In-memory broker: signed positions plus a cash balance.
+    """In-memory broker: signed positions carrying a weighted-average cost
+    basis, plus a cash balance.
 
     Backtests always construct with cash only and let place_order accumulate
     state across ticks. Live-clock paper runs use PaperBroker instead.
@@ -32,26 +38,23 @@ class SimBroker:
         self,
         cash: float,
         positions: dict[str, int] | None = None,
+        commission: Commission | None = None,
+        cost_basis: dict[str, float] | None = None,
     ) -> None:
-        self._cash = cash
-        self._shares: dict[str, int] = {
-            ticker: shares
-            for ticker, shares in (positions or {}).items()
-            if shares != 0
-        }
+        self._book = PositionBook(cash, positions, commission, cost_basis)
         # client_order_id -> Fill. Replayed instructions return the original
         # fill instead of moving the book twice.
         self._receipts: dict[str, Fill] = {}
 
     def positions(self) -> dict[str, Position]:
-        return {
-            t: Position(ticker=t, shares=s)
-            for t, s in self._shares.items()
-            if s != 0
-        }
+        return self._book.positions()
 
     def cash(self) -> float:
-        return self._cash
+        return self._book.cash
+
+    def realized_pnl(self) -> float:
+        """Cumulative realized P&L, gross of commission."""
+        return self._book.realized_pnl
 
     def place_order(self, order: Order) -> Fill:
         if not isfinite(order.price) or order.price <= 0:
@@ -64,21 +67,14 @@ class SimBroker:
         if cid is not None and cid in self._receipts:
             return self._receipts[cid]
 
-        if order.side == "buy":
-            self._shares[order.ticker] = self._shares.get(order.ticker, 0) + order.quantity
-            self._cash -= order.quantity * order.price
-        else:
-            self._shares[order.ticker] = self._shares.get(order.ticker, 0) - order.quantity
-            self._cash += order.quantity * order.price
-
-        if self._shares[order.ticker] == 0:
-            del self._shares[order.ticker]
-
+        movement = self._book.apply(order.ticker, order.side, order.quantity, order.price)
         fill = Fill(
             ticker=order.ticker,
             side=order.side,
             quantity=order.quantity,
             price=order.price,
+            commission=movement.commission,
+            realized_pnl=movement.realized_pnl,
         )
         if cid is not None:
             self._receipts[cid] = fill

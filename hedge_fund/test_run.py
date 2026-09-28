@@ -318,8 +318,8 @@ def test_backtest_still_constructs_sim_broker(monkeypatch):
     constructed: list[object] = []
     real = SimBroker
 
-    def wrap(cash, positions=None):
-        broker = real(cash=cash, positions=positions)
+    def wrap(cash, positions=None, **kwargs):
+        broker = real(cash=cash, positions=positions, **kwargs)
         constructed.append(broker)
         return broker
 

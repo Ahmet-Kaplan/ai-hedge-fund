@@ -8,11 +8,16 @@ replay here, and nothing is sent to a real venue.
 place_order is the Broker-protocol path used by run_cycle: open and fill
 at mark in one step so the pipeline stays unchanged. Delayed fills use
 open_order, then fill (optionally at a new mark) or cancel.
+
+Bookkeeping — cash, signed shares, weighted-average cost basis, realized P&L,
+commission — lives in `PositionBook`, shared with SimBroker so a paper run and
+a backtest of the same mandate cannot disagree about costs.
 """
 
 from __future__ import annotations
 
-from hedge_fund.brokers.models import Fill, Order, Position
+from hedge_fund.brokers.book import PositionBook
+from hedge_fund.brokers.models import Commission, Fill, Order, Position
 
 
 class PaperBroker:
@@ -28,13 +33,10 @@ class PaperBroker:
         self,
         cash: float,
         positions: dict[str, int] | None = None,
+        commission: Commission | None = None,
+        cost_basis: dict[str, float] | None = None,
     ) -> None:
-        self._cash = cash
-        self._shares: dict[str, int] = {
-            ticker: shares
-            for ticker, shares in (positions or {}).items()
-            if shares != 0
-        }
+        self._book = PositionBook(cash, positions, commission, cost_basis)
         self._open: dict[str, Order] = {}
         self._filled: set[str] = set()
         self._cancelled: set[str] = set()
@@ -46,14 +48,14 @@ class PaperBroker:
         self._client_ids: dict[str, str] = {}
 
     def positions(self) -> dict[str, Position]:
-        return {
-            t: Position(ticker=t, shares=s)
-            for t, s in self._shares.items()
-            if s != 0
-        }
+        return self._book.positions()
 
     def cash(self) -> float:
-        return self._cash
+        return self._book.cash
+
+    def realized_pnl(self) -> float:
+        """Cumulative realized P&L, gross of commission."""
+        return self._book.realized_pnl
 
     def open_orders(self) -> dict[str, Order]:
         """Currently open tickets. A copy; mutations do not touch the book."""
@@ -140,14 +142,8 @@ class PaperBroker:
         return dict(self._receipts)
 
     def _apply(self, ticker: str, side: str, quantity: int, price: float) -> Fill:
-        if side == "buy":
-            self._shares[ticker] = self._shares.get(ticker, 0) + quantity
-            self._cash -= quantity * price
-        else:
-            self._shares[ticker] = self._shares.get(ticker, 0) - quantity
-            self._cash += quantity * price
-
-        if self._shares[ticker] == 0:
-            del self._shares[ticker]
-
-        return Fill(ticker=ticker, side=side, quantity=quantity, price=price)
+        movement = self._book.apply(ticker, side, quantity, price)
+        return Fill(
+            ticker=ticker, side=side, quantity=quantity, price=price,
+            commission=movement.commission, realized_pnl=movement.realized_pnl,
+        )

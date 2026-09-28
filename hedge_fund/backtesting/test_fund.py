@@ -292,3 +292,55 @@ def test_daily_replay_executes_before_creating_next_assessment():
     assert events == [("valuation", "2024-06-03"), ("assessment", "2024-06-03"),
                       ("execution", "2024-06-04"), ("valuation", "2024-06-04"),
                       ("assessment", "2024-06-04")]
+
+
+# ---------------------------------------------------------------------------
+# Costs
+# ---------------------------------------------------------------------------
+
+def test_commission_flows_through_a_backtest():
+    """A mandate that states a cost schedule must actually pay it.
+
+    Ported from PR #19: its SimBroker learned to charge commission, but nothing
+    constructed a broker with one, so the feature could not reach a backtest.
+
+    One flat benchmark and one rising name over a single week, so the numbers
+    can be checked by hand: 100,000 committed at 130 floors to 769 shares, and
+    the ticket costs 10 + 0.01 * 769 = 17.69.
+    """
+    from hedge_fund.brokers import Commission
+
+    series = {
+        "SPY": {"2024-06-07": 100.0, "2024-06-14": 100.0},
+        "AAPL": {"2024-06-07": 100.0, "2024-06-14": 130.0},
+    }
+    free = _run(series=series)
+    costly = _run(series=series, spec=_spec(commission=Commission(per_trade=10.0, per_share=0.01)))
+
+    # Same book — the cost is cash, not a different position.
+    assert free.records[0].positions == costly.records[0].positions == {"AAPL": 769}
+    assert free.records[0].cash - costly.records[0].cash == pytest.approx(17.69)
+
+    charged = sum(f.commission for r in costly.records for f in r.fills)
+    assert charged == pytest.approx(17.69)
+    assert free.metrics.total_return_pct > costly.metrics.total_return_pct
+
+
+def test_a_mandate_without_a_schedule_backtests_bit_identically():
+    """The reason costs can be added without invalidating old results."""
+    from hedge_fund.brokers import Commission
+
+    implicit = _run()
+    explicit_zero = _run(spec=_spec(commission=Commission()))
+
+    assert implicit.records[0].model_dump() == explicit_zero.records[0].model_dump()
+    assert implicit.metrics == explicit_zero.metrics
+
+
+def test_commission_round_trips_through_the_mandate():
+    from hedge_fund.brokers import Commission
+
+    spec = _spec(commission=Commission(per_trade=1.5, per_share=0.02))
+    reloaded = FundSpec.model_validate_json(spec.model_dump_json())
+
+    assert reloaded.commission == Commission(per_trade=1.5, per_share=0.02)

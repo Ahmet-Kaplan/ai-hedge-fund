@@ -12,7 +12,17 @@ from hedge_fund.signals.llm_agent import LLMAgent
 
 
 class BurryAgent(LLMAgent):
-    """Reasons over fundamentals in Michael Burry's voice."""
+    """Reasons over fundamentals in Michael Burry's voice.
+
+    Burry's edge is balance-sheet skepticism, so the gap in what the snapshot
+    carries matters more here than for any other persona: debt/equity and the
+    current ratio are leverage and liquidity *proxies* only — there is no
+    debt-maturity schedule, no explicit interest coverage, and no
+    off-balance-sheet detail. The prompt says so, and tells the persona to
+    treat that as a blind spot to reason around rather than a clean bill of
+    health. (Borrowed from PR #20, which was otherwise a duplicate of this
+    agent: the specificity about which numbers are missing is worth keeping.)
+    """
 
     # Burry shorts crowded, structurally fragile names as well as
     # buying hated ones — the asymmetry runs both ways.
@@ -36,6 +46,12 @@ Work through your checklist:
 2. Hidden risk — rising leverage, a weakening current ratio, free cash
    flow that does not match earnings, or a multiple that only works if
    nothing goes wrong. That is how accounts blow up.
+   The blind spot: this snapshot carries reported debt/equity and the
+   current ratio only — no debt-maturity schedule, no explicit interest
+   coverage, no off-balance-sheet or lease detail. A levered company with
+   nothing alarming in two ratios can still be one refinancing away from
+   trouble, so weight visible leverage conservatively rather than assuming
+   what you cannot see is fine.
 3. Asymmetry — is the downside bounded (asset value, net cash, already
    depressed multiple) while the upside is large if the market is simply
    wrong? If both sides are symmetric, pass.
@@ -58,7 +74,9 @@ Confidence scale (0-100): 90-100 rare, lopsided setup you would size;
 Hard rules:
 - Reason ONLY from the data provided. Treat the most recent filing date
   shown as the present day; do not use any knowledge of anything that
-  happened after it. Do not invent numbers.
+  happened after it. Do not invent numbers — including debt-maturity,
+  interest-coverage or off-balance-sheet figures this snapshot does not
+  contain.
 - If the data is insufficient to judge, say so and go neutral.
 
 Respond with JSON only, in exactly this schema:

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from hedge_fund.brokers.alpaca import AlpacaBroker, AlpacaSettings
+from hedge_fund.brokers.models import Commission
 from hedge_fund.brokers.paper import PaperBroker
 from hedge_fund.brokers.sim import SimBroker
 from hedge_fund.ledger import broker_for_run, latest_reference
@@ -61,6 +62,7 @@ def open_venue(
     fund_name: str,
     capital: float,
     receipts: Path,
+    commission: Commission | None = None,
 ) -> OpenVenue:
     """Open *venue* for *fund_name*.
 
@@ -88,9 +90,10 @@ def open_venue(
     if venue == "sim":
         reference = latest_reference(fund_name, receipts)
         if reference is None:
-            broker = SimBroker(cash=capital)
+            broker = SimBroker(cash=capital, commission=commission)
         else:
-            broker = SimBroker(cash=reference.cash, positions=dict(reference.positions))
+            broker = SimBroker(cash=reference.cash, positions=dict(reference.positions),
+                               commission=commission)
         return OpenVenue(
             name=venue,
             broker=broker,

@@ -31,6 +31,7 @@ from typing import Any, Literal, TypeAlias
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, ValidationError
 
+from hedge_fund.brokers.models import Commission
 from hedge_fund.fund.allocator import ALLOCATOR_NAMES, Allocator, get_allocator
 from hedge_fund.risk.limits import RiskLimits
 from hedge_fund.signals import ALPHA_MODEL_REGISTRY, LLMAgent, get_investment_approach
@@ -115,6 +116,12 @@ class FundSpec(BaseModel):
     )
     risk: RiskLimits
     capital: float = Field(default=100_000.0, gt=0)
+    commission: Commission = Field(
+        default_factory=Commission,
+        description="what a fill costs to execute: a per-ticket charge plus a "
+        "per-share rate. Defaults to zero, so a mandate that does not state a "
+        "schedule backtests exactly as it did before costs existed.",
+    )
     rebalance: Literal["daily", "weekly", "monthly"] = Field(
         default="weekly",
         description="how often the fund re-runs its cycle — a mandate choice, "

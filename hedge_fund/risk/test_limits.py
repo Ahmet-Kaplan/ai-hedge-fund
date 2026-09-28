@@ -93,3 +93,53 @@ def test_proportional_within_limits_is_unchanged(weights):
 def test_nonfinite_weights_fail_before_risk_adjustment(value, proportional):
     with pytest.raises(ValueError, match="A.*finite"):
         apply_limits({"A": value}, LIMITS, preserve_proportions=proportional)
+
+
+# ---------------------------------------------------------------------------
+# Cash reserve — a cap on NET exposure
+# ---------------------------------------------------------------------------
+
+def test_the_reserve_defaults_to_no_reserve_and_changes_nothing():
+    """At 0.0 the ceiling is 1.0 and an unlevered book sits exactly on it."""
+    plain = apply_limits({"A": 1.0}, RiskLimits(max_position_pct=1.0, max_gross_exposure=1.0))
+    explicit = apply_limits(
+        {"A": 1.0},
+        RiskLimits(max_position_pct=1.0, max_gross_exposure=1.0, min_cash_reserve_pct=0.0),
+    )
+
+    assert plain.weights == explicit.weights
+    assert explicit.clamps == []
+
+
+def test_the_reserve_caps_net_exposure_and_says_so():
+    limits = RiskLimits(max_position_pct=1.0, max_gross_exposure=1.0,
+                        min_cash_reserve_pct=0.3)
+
+    result = apply_limits({"A": 0.8, "B": 0.2}, limits)
+
+    assert sum(result.weights.values()) == pytest.approx(0.7)
+    assert result.weights["A"] / result.weights["B"] == pytest.approx(4.0)
+    assert [c.limit for c in result.clamps] == ["min_cash_reserve_pct"]
+    assert result.clamps[0].after == pytest.approx(0.7)
+
+
+def test_a_market_neutral_book_is_left_alone():
+    """Cash is equity * (1 - net exposure), and a hedged book is already in cash."""
+    limits = RiskLimits(max_position_pct=1.0, max_gross_exposure=1.0,
+                        min_cash_reserve_pct=0.3)
+
+    result = apply_limits({"A": 0.5, "B": -0.5}, limits)
+
+    assert result.weights == {"A": 0.5, "B": -0.5}
+    assert result.clamps == []
+
+
+def test_the_reserve_clamp_is_idempotent():
+    """Float dust must not record a second, meaningless clamp event."""
+    limits = RiskLimits(max_position_pct=1.0, max_gross_exposure=1.0,
+                        min_cash_reserve_pct=0.9)
+    once = apply_limits({"A": 1.0}, limits)
+    twice = apply_limits(once.weights, limits)
+
+    assert twice.clamps == []
+    assert twice.weights == once.weights

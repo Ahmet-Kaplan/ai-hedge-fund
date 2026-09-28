@@ -205,7 +205,8 @@ def main() -> None:
     receipts = ensure_mandates_dir()
     try:
         venue = open_venue(args.broker, fund_name=spec.name,
-                           capital=spec.capital, receipts=receipts)
+                           capital=spec.capital, receipts=receipts,
+                           commission=spec.commission)
     except ValueError as exc:
         parser.error(str(exc))
 
