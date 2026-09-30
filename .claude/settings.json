@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Bash(git push origin main)",
+      "Bash(git push origin main:*)",
+      "Bash(git push origin HEAD:main)",
+      "Bash(git push -f:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Bash(git checkout main)",
+      "Bash(export AIHF_ALLOW_FINANCIAL_DATASETS=1)"
+    ]
+  }
+}
