@@ -39,7 +39,7 @@ aihf
 
 The app asks for keys the first time it needs them and saves them to `~/.hedge-fund/.env` — nothing to configure up front. It needs:
 
-- A [Financial Datasets](https://financialdatasets.ai) API key, for prices, fundamentals, and earnings.
+- **Market data (free by default):** Alpaca keys (`APCA_API_KEY_ID`, `APCA_API_SECRET_KEY` — free with any [Alpaca](https://alpaca.markets) account) for daily prices, and `SEC_USER_AGENT="Your Name you@email.com"` for fundamentals and earnings from [SEC EDGAR](https://www.sec.gov/edgar) (no key; SEC asks every client for a contact). Everything is stored in `~/.hedge-fund/market.db` and fetched only once. To use [Financial Datasets](https://financialdatasets.ai) instead, set `HEDGE_FUND_DATA=fd` and `FINANCIAL_DATASETS_API_KEY`.
 - One model API key for the investor agents. Supported providers: Anthropic, OpenAI, DeepSeek, Google, xAI, Kimi, TypeSafe (Jev).
 
 Keys exported in your shell always win over the saved file.
@@ -89,9 +89,10 @@ are directly comparable.
 Add `APCA_API_KEY_ID` / `APCA_API_SECRET_KEY` (paper keys) to `~/.hedge-fund/.env`, then:
 
 ```bash
+aihf-paper data-sync            # download prices + SEC data, show coverage per ticker
 aihf-paper status               # account, halts, last NAV
 aihf-paper submit --dry-run     # see the plan, send nothing
-aihf-paper baseline             # backtest fund, each strategy, SPY, equal-weight
+aihf-paper baseline             # backtest fund, each strategy, SPY, equal-weight (resumable)
 aihf-paper install-schedule     # reconcile 09:00 ET, submit 10:00 ET, weekdays
 aihf-paper report               # paper return vs benchmark, slippage, fills
 ```
