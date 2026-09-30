@@ -1,0 +1,21 @@
+{
+  "llm_calls": 267,
+  "cache_hits": 898,
+  "cache_lookups": 1165,
+  "input_tokens": 601490,
+  "output_tokens": 162509,
+  "cost_usd": 5.6561,
+  "errors": 0,
+  "consecutive_errors": 0,
+  "expected_calls": 1200,
+  "stopped": "data/engine failure: EdgarClientError: GET https://www.sec.gov/Archives/edgar/data/1067983/000095017023004451/R1.htm failed: HTTPSConnectionPool(host='www.sec.gov', port=443): Max retries exceeded with url: /Archives/edgar/data/1067983/000095017023004451/R1.htm (Caused by ProxyError('Unable to connect to proxy', RemoteDisconnected('Remot",
+  "cycles_done": 79,
+  "parse_failures": 0,
+  "budget_usd": 26.0,
+  "dry_run": false,
+  "requests": {
+    "tiingo": 0,
+    "sec": 90
+  },
+  "elapsed_s": 2502
+}
