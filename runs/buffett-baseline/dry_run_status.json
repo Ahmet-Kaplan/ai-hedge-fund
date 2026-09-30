@@ -1,0 +1,21 @@
+{
+  "llm_calls": 0,
+  "cache_hits": 28,
+  "cache_lookups": 29,
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "cost_usd": 0.0,
+  "errors": 0,
+  "consecutive_errors": 0,
+  "expected_calls": 1200,
+  "stopped": "dry run: first uncached prompt reached after 28 cache hits; no API call made",
+  "cycles_done": 1,
+  "parse_failures": 0,
+  "budget_usd": 26.0,
+  "dry_run": true,
+  "requests": {
+    "tiingo": 0,
+    "sec": 0
+  },
+  "elapsed_s": 4
+}

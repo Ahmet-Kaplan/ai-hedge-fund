@@ -22,16 +22,19 @@ for var in ("FINANCIAL_DATASETS_API_KEY", "HEDGE_FUND_DATA_PROVIDER", "HEDGE_FUN
 MODEL = "claude-opus-5-5"
 os.environ["HEDGE_FUND_LLM_MODEL"] = MODEL
 
-BUDGET = float(os.environ.get("BASELINE_BUDGET_USD", "18"))
+BUDGET = float(os.environ.get("BASELINE_BUDGET_USD", "26"))   # cap on NEW spend this process
 IN_PER_TOK, OUT_PER_TOK = 4.00 / 1e6, 20.00 / 1e6          # Opus 5.5 $/token
 WORST_CALL = 0.15                                          # reserve per call (max_tokens=4096 -> <= $0.082 output)
-PROBE_CALLS = int(os.environ.get("BASELINE_PROBE_CALLS", "15"))
+PROBE_CALLS = int(os.environ.get("BASELINE_PROBE_CALLS", "0"))  # 0 = no projection stop
+DRY_RUN = os.environ.get("BASELINE_DRY_RUN") == "1"  # any API call -> stop, zero spend
+MAX_PARSE_FAILURES = 3
 MAX_CONSECUTIVE_ERRORS, MAX_TOTAL_ERRORS = 3, 10
 
 START, END = "2016-07-01", "2026-06-30"
 OUT_DIR = Path(sys.argv[1] if len(sys.argv) > 1 else "runs/buffett-baseline")
 SCHEDULE = OUT_DIR / "universe_top10.json"
 MANDATE = Path("configs/buffett-baseline.yaml")
+LLM_CACHE = OUT_DIR / "llm_cache"
 
 
 class RunStop(BaseException):
@@ -44,13 +47,41 @@ from hedge_fund.data import make_data_client  # noqa: E402
 from hedge_fund.fund import Fund, load_spec  # noqa: E402
 from hedge_fund.llm import cache as cache_mod  # noqa: E402
 from hedge_fund.llm import client as client_mod  # noqa: E402
+from hedge_fund.signals import llm_agent as agent_mod  # noqa: E402
 from hedge_fund.universe.builder import load_schedule  # noqa: E402
+
+import tempfile  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
+
+
+def atomic_put(self, key, record):
+    """PromptCache.put, but atomic: write a temp file then os.replace."""
+    self._dir.mkdir(parents=True, exist_ok=True)
+    record = {**record, "created_at": datetime.now(timezone.utc).isoformat()}
+    fd_, tmp = tempfile.mkstemp(dir=self._dir, prefix=f".{key}.", suffix=".tmp")
+    with os.fdopen(fd_, "w") as fh:
+        fh.write(json.dumps(record, indent=2))
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, self._dir / f"{key}.json")
+    if "parse_error" in record:
+        with lock:
+            S["parse_failures"] += 1
+            log(f"PARSE FAILURE #{S['parse_failures']} for {record.get('ticker')}@{record.get('as_of')}")
+            if S["parse_failures"] >= MAX_PARSE_FAILURES:
+                S["stopped"] = f"repeated LLM parse failures ({S['parse_failures']})"
+                raise RunStop(S["stopped"])
+
+
+cache_mod.PromptCache.put = atomic_put
+# Every agent reads and writes the committed, persistent cache directory.
+agent_mod.PromptCache = lambda *a, **k: cache_mod.PromptCache(LLM_CACHE)
 
 lock = threading.Lock()
 S = {"llm_calls": 0, "cache_hits": 0, "cache_lookups": 0, "input_tokens": 0, "output_tokens": 0,
      "cost_usd": 0.0, "errors": 0, "consecutive_errors": 0, "expected_calls": None,
-     "stopped": None, "cycles_done": 0}
-log_file = open(OUT_DIR / "run.log", "a", buffering=1)
+     "stopped": None, "cycles_done": 0, "parse_failures": 0, "budget_usd": BUDGET, "dry_run": DRY_RUN}
+log_file = open(OUT_DIR / ("dry_run.log" if DRY_RUN else "run.log"), "a", buffering=1)
 
 
 def log(msg: str) -> None:
@@ -76,6 +107,9 @@ cache_mod.PromptCache.get = metered_get
 
 def metered_complete(self, system: str, user: str) -> str:
     with lock:
+        if DRY_RUN:
+            S["stopped"] = f"dry run: first uncached prompt reached after {S['cache_hits']} cache hits; no API call made"
+            raise RunStop(S["stopped"])
         if S["cost_usd"] + WORST_CALL > BUDGET:
             S["stopped"] = f"budget guard: ${S['cost_usd']:.2f} spent, next call could exceed ${BUDGET:.2f}"
             raise RunStop(S["stopped"])
@@ -103,7 +137,7 @@ def metered_complete(self, system: str, user: str) -> str:
         S["output_tokens"] += tout
         S["cost_usd"] += tin * IN_PER_TOK + tout * OUT_PER_TOK
         n = S["llm_calls"]
-        if n == PROBE_CALLS and S["expected_calls"]:
+        if PROBE_CALLS and n == PROBE_CALLS and S["expected_calls"]:
             per = S["cost_usd"] / n
             remaining = max(S["expected_calls"] - S["cache_lookups"], 0)
             projected = S["cost_usd"] + per * remaining
@@ -142,10 +176,14 @@ def main() -> int:
             result = backtest_fund(fund, START, END, fd, pit, on_cycle=on_cycle)
         except RunStop as exc:
             log(f"STOPPED SAFELY: {exc}")
+        except Exception as exc:  # data-integrity / engine failure: stop, keep paid work
+            S["stopped"] = f"data/engine failure: {type(exc).__name__}: {str(exc)[:300]}"
+            log(f"STOPPED ON ERROR: {S['stopped']}")
         finally:
             S["requests"] = fd.request_counts()
             S["elapsed_s"] = round(time.time() - t0)
             S["cost_usd"] = round(S["cost_usd"], 4)
+            status_path = status_path.with_name("dry_run_status.json") if DRY_RUN else status_path
             status_path.write_text(json.dumps(S, indent=2))
     if result is None:
         return 4
