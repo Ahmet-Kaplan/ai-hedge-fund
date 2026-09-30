@@ -49,7 +49,7 @@ from hedge_fund.data.sessions import completed_through, session_closes
 from hedge_fund.data.tradability import tradable_closes
 
 PRICE_FIELDS = ("open", "high", "low", "close", "volume")
-FIELDS = (*PRICE_FIELDS, "dividend")
+FIELDS = (*PRICE_FIELDS, "dividend", "split")
 
 
 class FutureDataError(LookupError):
@@ -150,6 +150,13 @@ class MarketPanel:
                     factor = raw[d] / bars[d].close if raw.get(d) and bars[d].close else 1.0
                     frames["dividend"].loc[d, t] = float(cash) / factor
         frames["dividend"] = frames["dividend"].fillna(0.0)
+        # Split factor on its effective session (1.0 otherwise) — a fact dated
+        # like any bar, so a view sees a split only on or after that session.
+        frames["split"] = pd.DataFrame(1.0, index=index, columns=tickers)
+        for t, events in splits.items():
+            for d, f in events:
+                if d in frames["split"].index:
+                    frames["split"].loc[d, t] = f
 
         members = None
         if schedule is not None:
@@ -275,15 +282,17 @@ class AsOfView:
              tradable_only: bool = True) -> pd.DataFrame:
         """A sessions x tickers frame of *field* up to `end` (default: as-of).
 
-        *field* is one of open, high, low, close, volume, dividend. Price
+        *field* is one of open, high, low, close, volume, dividend, split
+        (the split factor on its effective session, else 1.0). Price
         fields are NaN where the bar is not tradable unless *tradable_only*
         is False. *lookback* keeps the last N sessions.
         """
         if field not in FIELDS:
             raise ValueError(f"unknown field {field!r}; expected one of {', '.join(FIELDS)}")
         out = self._rows(self._frames[field], start, end, lookback, tickers)
-        scale = self._basis.reindex(out.columns).fillna(1.0)
-        out = out / scale if field == "volume" else out * scale
+        if field != "split":
+            scale = self._basis.reindex(out.columns).fillna(1.0)
+            out = out / scale if field == "volume" else out * scale
         if tradable_only and field in PRICE_FIELDS:
             mask = self._rows(self._tradable, start, end, lookback, tickers)
             out = out.where(mask)
