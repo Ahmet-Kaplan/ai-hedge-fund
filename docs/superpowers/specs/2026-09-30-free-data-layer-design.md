@@ -227,3 +227,26 @@ shorting. No strategy can be judged fairly on it. Next: a point-in-time
 universe (the ~100 largest US stocks as of each date, delisted names
 included), built from Alpaca bars + SEC, before re-testing Phase 2 or
 starting Phase 3.
+
+### 11b. Phase 2 re-test on a point-in-time universe (2026-09-30)
+
+Universe: each month, the 100 S&P 500 members (as of that month, from
+Wikipedia's change log) with the highest median daily dollar volume over the
+prior ~3 months; 236 distinct names over the window, delistings handled
+(held names sold at their last close). Same costs and caps as above.
+
+| Variant | Annual | Sharpe | Max DD | Alpha vs SPY (t) | vs equal-weight (t) |
+|---|---|---|---|---|---|
+| Equal-weight top 100 | +16.3% | 0.91 | 32.9% | +1.0% (0.8) | — |
+| Equal-weight, inverse-vol | +14.6% | 0.91 | 30.7% | +1.0% (0.8) | −1.9% (−1.6) |
+| Momentum long-only + SPY | +15.8% | 0.96 | 29.3% | +2.5% (1.2) | −0.7% (−0.3) |
+| SPY | +15.1% | 0.88 | 33.8% | — | — |
+| Momentum L/S, conviction | +7.4% | 0.55 | 27.1% | +0.2% (0.1) | −8.6% (−1.8) |
+| Momentum L/S, inverse-vol | +7.8% | 0.64 | 25.4% | +0.5% (0.2) | −8.6% (−2.0) |
+
+Findings: the 32-name list overstated equal-weight by ~6%/yr (22.4% → 16.3%).
+Momentum long/short is rejected on large caps. Momentum long-only has the best
+Sharpe but its edge is not statistically distinguishable from zero and it trails
+equal-weight; not adopted. Inverse-vol sizing trims drawdowns at a return cost.
+No variant beats equal-weighting the largest 100 by a reliable margin — the bar
+the LLM agents must clear.
