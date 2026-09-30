@@ -37,7 +37,7 @@ from rich.console import Console
 
 from hedge_fund.backtesting import backtest_fund
 from hedge_fund.brokers import SimBroker
-from hedge_fund.data import CachedDataClient, FDClient
+from hedge_fund.data import open_data_client
 from hedge_fund.fund import Fund, load_spec, normalize_universe
 from hedge_fund.paths import ensure_mandates_dir
 from hedge_fund.pipeline import run_cycle
@@ -119,8 +119,7 @@ def main() -> None:
         start = args.start or (
             _date.fromisoformat(args.date) - timedelta(weeks=_BACKTEST_WEEKS)
         ).isoformat()
-        with FDClient() as raw:
-            fd = CachedDataClient(raw)
+        with open_data_client() as fd:
             with console.status(
                 f"[cyan]{spec.name}: backtesting {start} → {args.date} "
                 f"({spec.rebalance} rebalance vs {spec.benchmark}) "
@@ -142,8 +141,7 @@ def main() -> None:
 
     broker = SimBroker(cash=spec.capital)
 
-    with FDClient() as raw:
-        fd = CachedDataClient(raw)
+    with open_data_client() as fd:
         n_models = sum(len(staff) for _, staff in fund.strategies)
         with console.status(
             f"[cyan]{spec.name}: running one cycle as of {args.date} — "

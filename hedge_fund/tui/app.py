@@ -42,7 +42,7 @@ from hedge_fund.backtesting.fund import (
     performance_metrics,
 )
 from hedge_fund.brokers import Fill, SimBroker
-from hedge_fund.data import CachedDataClient, FDClient
+from hedge_fund.data import missing_data_keys, open_data_client
 from hedge_fund.data.sessions import completed_through
 from hedge_fund.fund import (
     custom_strategy,
@@ -251,6 +251,14 @@ class KeyPromptScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
+_DATA_KEY_LABELS = {
+    "FINANCIAL_DATASETS_API_KEY": "Financial Datasets",
+    "APCA_API_KEY_ID": "Alpaca (market data) key ID",
+    "APCA_API_SECRET_KEY": "Alpaca (market data) secret",
+    "SEC_USER_AGENT": "SEC contact (\"Your Name you@email.com\")",
+}
+
+
 def _demand_run_keys(app, resume) -> bool:
     """True if every key a run needs is in the environment: the data key
     first, then the selected model's LLM key. Otherwise open the prompt for
@@ -258,10 +266,10 @@ def _demand_run_keys(app, resume) -> bool:
     this gate so the next missing key is asked for in turn. Ask here, not
     deep inside a worker thread: a run that dies on a missing credential has
     already spent minutes of warming."""
-    if not os.environ.get("FINANCIAL_DATASETS_API_KEY"):
+    missing = missing_data_keys()
+    if missing:
         app.push_screen(
-            KeyPromptScreen("Financial Datasets",
-                            "FINANCIAL_DATASETS_API_KEY"),
+            KeyPromptScreen(_DATA_KEY_LABELS.get(missing[0], missing[0]), missing[0]),
             lambda saved: resume() if saved else None)
         return False
     provider = provider_for(os.environ.get("HEDGE_FUND_LLM_MODEL", ""))
@@ -1285,8 +1293,7 @@ class RunScreen(Screen):
                 # no client and simply runs.
                 model = (cls(llm=make_llm(on_token=desk.feed))
                          if issubclass(cls, LLMAgent) else cls())
-                with FDClient() as raw:
-                    fd = CachedDataClient(raw)
+                with open_data_client() as fd:
                     for ticker in universe:
                         desk.begin(ticker)
                         try:
@@ -1302,8 +1309,8 @@ class RunScreen(Screen):
 
             fund = Fund(spec)
             broker = SimBroker(cash=spec.capital)
-            with FDClient() as raw:
-                record = run_cycle(fund, as_of, broker, CachedDataClient(raw),
+            with open_data_client() as raw:
+                record = run_cycle(fund, as_of, broker, raw,
                                    universe)
 
             # Receipts, same shape as a backtest's: the run is recoverable,
@@ -1868,8 +1875,8 @@ class BacktestScreen(Screen):
              universe: list[str]) -> None:
         app = self.app
         try:
-            with FDClient() as raw:
-                schedule = build_schedule(CachedDataClient(raw), spec.benchmark, start, end, spec.rebalance)
+            with open_data_client() as raw:
+                schedule = build_schedule(raw, spec.benchmark, start, end, spec.rebalance)
             grid = schedule.assessment_dates
             app.call_from_thread(self._begin_warm, spec, universe, len(grid))
             self._warm_market(spec, universe, grid)
@@ -1885,8 +1892,8 @@ class BacktestScreen(Screen):
             def valuation(i: int, n: int, value: DailyValuation) -> None:
                 app.call_from_thread(self._board_valuation, value)
 
-            with FDClient() as raw:
-                result = backtest_fund(fund, start, end, CachedDataClient(raw),
+            with open_data_client() as raw:
+                result = backtest_fund(fund, start, end, raw,
                                        universe, on_cycle=tick, on_valuation=valuation)
 
             FUNDS_DIR.mkdir(exist_ok=True)
@@ -1914,8 +1921,7 @@ class BacktestScreen(Screen):
         bar = self.query_one("#warm-progress", ProgressBar)
 
         def prefetch(ticker: str, dates: list[str]) -> None:
-            with FDClient() as raw:  # own client per task (requests isn't shared-safe)
-                fd = CachedDataClient(raw)
+            with open_data_client() as fd:  # own client per task (requests isn't shared-safe)
                 if has_agents:
                     fd.get_company_facts(ticker)
                 for as_of in dates:
@@ -1949,8 +1955,7 @@ class BacktestScreen(Screen):
             who = display[agent_name]
             cls = ALPHA_MODEL_REGISTRY[agent_name]  # own instance per thread
             model = cls(blind=True) if issubclass(cls, LLMAgent) else cls()
-            with FDClient() as raw:
-                fd = CachedDataClient(raw)
+            with open_data_client() as fd:
                 for as_of in grid:
                     for ticker in universe:
                         app.call_from_thread(

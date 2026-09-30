@@ -23,7 +23,7 @@ from pathlib import Path
 
 from hedge_fund.backtesting.fund import FundBacktestResult
 from hedge_fund.brokers.alpaca import AlpacaPaperClient
-from hedge_fund.data import CachedDataClient, FDClient
+from hedge_fund.data import open_data_client
 from hedge_fund.data.sessions import NEW_YORK, completed_through
 from hedge_fund.fund import Fund, FundSpec, load_spec, normalize_universe
 from hedge_fund.live.baseline import POST_CUTOFF_START, run_baseline
@@ -101,8 +101,8 @@ def main(argv: list[str] | None = None) -> int:
 
 def _submit(args, spec: FundSpec, ledger: Ledger) -> int:
     fund = Fund(spec)
-    with FDClient() as raw:
-        result = submit(fund, load_universe(args.universe), AlpacaPaperClient(), CachedDataClient(raw),
+    with open_data_client() as raw:
+        result = submit(fund, load_universe(args.universe), AlpacaPaperClient(), raw,
                         ledger, now=datetime.now(NEW_YORK), dry_run=args.dry_run,
                         force_rebalance=getattr(args, "now", False))
     print(f"{result.session}: {result.status} {result.detail}")
@@ -119,8 +119,8 @@ def _submit(args, spec: FundSpec, ledger: Ledger) -> int:
 def _reconcile(args, spec: FundSpec, ledger: Ledger) -> int:
     client = AlpacaPaperClient()
     session = session_to_reconcile(client, datetime.now(NEW_YORK))
-    with FDClient() as raw:
-        result = reconcile(spec, client, CachedDataClient(raw), ledger, session=session)
+    with open_data_client() as raw:
+        result = reconcile(spec, client, raw, ledger, session=session)
     print(f"{session}: equity ${result.nav.equity:,.2f} · gross {result.nav.gross:.0%} · {len(result.fills)} fills")
     for message in result.mismatches:
         print(f"  WARNING {message}")
@@ -134,8 +134,8 @@ def _report(args, spec: FundSpec, ledger: Ledger) -> int:
         print("not enough history yet: need at least two reconciled sessions")
         return 0
     if args.attribution:
-        with FDClient() as raw:
-            report.strategy_contribution = strategy_attribution(ledger, CachedDataClient(raw))
+        with open_data_client() as raw:
+            report.strategy_contribution = strategy_attribution(ledger, raw)
     print(report.model_dump_json(indent=2))
     if report.n_rebalances < MIN_REBALANCES_FOR_VERDICT:
         print(f"note: {report.n_rebalances} rebalances so far; no verdict before {MIN_REBALANCES_FOR_VERDICT}", file=sys.stderr)
@@ -177,8 +177,8 @@ def _resume(args, spec: FundSpec, ledger: Ledger) -> int:
 
 
 def _baseline(args, spec: FundSpec, ledger: Ledger) -> int:
-    with FDClient() as raw:
-        report = run_baseline(spec, load_universe(args.universe), args.start, args.end, CachedDataClient(raw))
+    with open_data_client() as raw:
+        report = run_baseline(spec, load_universe(args.universe), args.start, args.end, raw)
     out = Path(args.out) if args.out else ledger.root / "baseline" / f"{args.start}_{args.end}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(report.model_dump_json(indent=2))
