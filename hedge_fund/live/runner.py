@@ -126,6 +126,36 @@ def submit(
     return done(status, f"{len(orders)} orders sent, {rejected} rejected", plan=plan, orders=orders)
 
 
+def retry_rejected(
+    client: PaperAccount, ledger: Ledger, *, now: datetime, kill_path: Path = KILL_PATH,
+) -> list[OrderResult]:
+    """Re-send today's rejected orders (e.g. blocked by a since-filled manual order).
+
+    Same quantities and client order ids as the original plan; the plan file is
+    updated in place. Refuses when killed, when there is no plan for today, or
+    after the market-on-close cutoff.
+    """
+    now = now.astimezone(NEW_YORK)
+    session = now.date().isoformat()
+    if kill_path.exists():
+        raise ValueError(f"{kill_path} exists (KILL switch on); not sending anything")
+    if now.time() > MOC_CUTOFF:
+        raise ValueError(f"after {MOC_CUTOFF:%H:%M} ET (15:45); market-on-close orders are closed for today")
+    payload = ledger.read_plan(session)
+    if payload is None:
+        raise ValueError(f"no plan submitted for {session}; nothing to retry")
+    retried: list[OrderResult] = []
+    for i, order in enumerate(payload["orders"]):
+        if order["status"] != "rejected":
+            continue
+        result = client.submit_moc(order["ticker"], order["side"], order["quantity"], order["client_order_id"])
+        payload["orders"][i] = result.model_dump(mode="json")
+        ledger.write_plan(session, payload)
+        retried.append(result)
+        logger.info("retry %s %s %d: %s %s", order["ticker"], order["side"], order["quantity"], result.status, result.reason or "")
+    return retried
+
+
 def _drawdown_breach(ledger: Ledger) -> str | None:
     """A halt reason if the latest NAV is DRAWDOWN_HALT or more below its peak."""
     peak, latest = ledger.peak_equity(), ledger.latest_equity()

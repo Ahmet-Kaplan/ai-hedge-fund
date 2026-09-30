@@ -2,6 +2,7 @@
 
     aihf-paper status                  account, halts, last NAV, schedule
     aihf-paper submit [--dry-run] [--now]  plan (and send) today's MOC rebalance
+    aihf-paper retry-rejected          re-send today's rejected orders
     aihf-paper reconcile               record the previous session's fills + NAV
     aihf-paper report [--backtest F] [--attribution]
     aihf-paper baseline [--start D] [--end D]
@@ -31,7 +32,7 @@ from hedge_fund.live.baseline import POST_CUTOFF_START, run_baseline
 from hedge_fund.live.launchd import install_schedule, notify, schedule_installed, uninstall_schedule
 from hedge_fund.live.ledger import Ledger
 from hedge_fund.live.report import MIN_REBALANCES_FOR_VERDICT, build_report, strategy_attribution
-from hedge_fund.live.runner import reconcile, session_to_reconcile, submit
+from hedge_fund.live.runner import reconcile, retry_rejected, session_to_reconcile, submit
 from hedge_fund.data.store import MarketStore
 from hedge_fund.paths import KILL_PATH, MARKET_DB_PATH
 from hedge_fund.tui.keys import apply_credentials
@@ -66,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="plan and save, send nothing (works any day)")
     p.add_argument("--now", action="store_true",
                    help="rebalance today even if it is not the first session of the period (e.g. to start the fund)")
+    command("retry-rejected", "re-send today's rejected orders (same plan, same quantities)")
     command("reconcile", "record the previous session's fills and closing NAV")
     p = command("report", "paper performance from the ledger")
     p.add_argument("--backtest", help="a backtest result JSON to compare over the same dates")
@@ -118,6 +120,15 @@ def _submit(args, spec: FundSpec, ledger: Ledger) -> int:
         if r.status == "rejected":
             print(f"  REJECTED {r.ticker}: {r.reason}")
     return 0
+
+
+def _retry(args, spec: FundSpec, ledger: Ledger) -> int:
+    retried = retry_rejected(AlpacaPaperClient(), ledger, now=datetime.now(NEW_YORK))
+    if not retried:
+        print("no rejected orders today")
+    for r in retried:
+        print(f"{r.ticker:6} {r.side:4} {r.quantity:>6}  {r.status}" + (f"  {r.reason}" if r.reason else ""))
+    return 1 if any(r.status == "rejected" for r in retried) else 0
 
 
 def _reconcile(args, spec: FundSpec, ledger: Ledger) -> int:
@@ -238,7 +249,7 @@ def _uninstall(args, spec: FundSpec, ledger: Ledger) -> int:
 
 
 _COMMANDS = {
-    "submit": _submit, "reconcile": _reconcile, "report": _report, "status": _status,
+    "submit": _submit, "retry-rejected": _retry, "reconcile": _reconcile, "report": _report, "status": _status,
     "flatten": _flatten, "resume": _resume, "baseline": _baseline,
     "data-sync": _data_sync, "install-schedule": _install, "uninstall-schedule": _uninstall,
 }

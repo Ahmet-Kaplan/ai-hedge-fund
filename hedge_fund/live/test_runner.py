@@ -230,3 +230,32 @@ def test_force_rebalance_trades_mid_week_but_keeps_other_guards(ledger, tmp_path
     late = submit(fund, ["AAPL"], FakeAlpaca(), FakeDataClient(SERIES), ledger,
                   now=datetime(2024, 6, 11, 15, 46, tzinfo=NEW_YORK), force_rebalance=True, kill_path=tmp_path / "KILL")
     assert late.status == "too_late"
+
+
+# ---------------------------------------------------------------------------
+# retry_rejected
+# ---------------------------------------------------------------------------
+
+def test_retry_resends_only_rejected_orders(ledger, tmp_path):
+    from hedge_fund.live.runner import retry_rejected
+    first = FakeAlpaca(reject={"AAPL"})
+    run_submit(first, ledger, tmp_path)
+    assert ledger.read_plan("2024-06-10")["orders"][0]["status"] == "rejected"
+    again = FakeAlpaca()
+    retried = retry_rejected(again, ledger, now=datetime(2024, 6, 10, 14, 0, tzinfo=NEW_YORK), kill_path=tmp_path / "KILL")
+    assert [(o.ticker, o.status) for o in retried] == [("AAPL", "accepted")]
+    assert again.submitted == [("AAPL", "buy", 500, "paper-test-2024-06-10-AAPL")]
+    assert ledger.read_plan("2024-06-10")["orders"][0]["status"] == "accepted"
+    assert retry_rejected(FakeAlpaca(), ledger, now=datetime(2024, 6, 10, 14, 0, tzinfo=NEW_YORK), kill_path=tmp_path / "KILL") == []
+
+
+def test_retry_respects_the_guards(ledger, tmp_path):
+    from hedge_fund.live.runner import retry_rejected
+    run_submit(FakeAlpaca(reject={"AAPL"}), ledger, tmp_path)
+    with pytest.raises(ValueError, match="15:45"):
+        retry_rejected(FakeAlpaca(), ledger, now=datetime(2024, 6, 10, 15, 50, tzinfo=NEW_YORK), kill_path=tmp_path / "KILL")
+    (tmp_path / "KILL").touch()
+    with pytest.raises(ValueError, match="KILL"):
+        retry_rejected(FakeAlpaca(), ledger, now=datetime(2024, 6, 10, 14, 0, tzinfo=NEW_YORK), kill_path=tmp_path / "KILL")
+    with pytest.raises(ValueError, match="no plan"):
+        retry_rejected(FakeAlpaca(), ledger, now=datetime(2024, 6, 11, 10, 0, tzinfo=NEW_YORK), kill_path=tmp_path / "NOKILL")
