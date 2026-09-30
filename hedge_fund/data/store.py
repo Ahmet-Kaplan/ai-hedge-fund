@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from hedge_fund.data.models import Price
@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS sec_filings (
     cik TEXT, accn TEXT PRIMARY KEY, form TEXT, filed TEXT, report_date TEXT, items TEXT);
 CREATE INDEX IF NOT EXISTS sec_filings_cik ON sec_filings (cik, form);
 CREATE TABLE IF NOT EXISTS sec_sync (cik TEXT PRIMARY KEY, facts_fetched_at TEXT, submissions_fetched_at TEXT);
+CREATE TABLE IF NOT EXISTS sp500_members (ticker TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS sp500_changes (date TEXT, added TEXT, removed TEXT);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS backtest_runs (
     run_key TEXT PRIMARY KEY, label TEXT, status TEXT, started_at TEXT, finished_at TEXT,
     result_json TEXT, error TEXT);
@@ -168,6 +171,25 @@ class MarketStore:
         with self._db:
             self._db.execute("INSERT OR REPLACE INTO sec_sync VALUES (?,?,?)",
                              (cik, facts_at or current_facts, submissions_at or current_subs))
+
+    # -- S&P 500 membership ----------------------------------------------------
+
+    def replace_sp500(self, current: list[str], changes: list[tuple], fetched_at: str) -> None:
+        with self._db:
+            self._db.execute("DELETE FROM sp500_members")
+            self._db.execute("DELETE FROM sp500_changes")
+            self._db.executemany("INSERT OR IGNORE INTO sp500_members VALUES (?)", [(t,) for t in current])
+            self._db.executemany("INSERT INTO sp500_changes VALUES (?,?,?)",
+                                 [(d.isoformat(), added, removed) for d, added, removed in changes])
+            self._db.execute("INSERT OR REPLACE INTO meta VALUES ('sp500_fetched_at', ?)", (fetched_at,))
+
+    def sp500(self) -> tuple[list[str], list[tuple], str | None]:
+        """(current members, [(date, added, removed)] newest first, fetched_at)."""
+        current = [r[0] for r in self._db.execute("SELECT ticker FROM sp500_members ORDER BY ticker")]
+        changes = [(date.fromisoformat(r[0]), r[1], r[2])
+                   for r in self._db.execute("SELECT date, added, removed FROM sp500_changes ORDER BY date DESC")]
+        row = self._db.execute("SELECT value FROM meta WHERE key='sp500_fetched_at'").fetchone()
+        return current, changes, row[0] if row else None
 
     # -- finished runs ---------------------------------------------------------
 
