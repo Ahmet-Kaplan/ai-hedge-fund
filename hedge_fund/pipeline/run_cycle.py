@@ -86,12 +86,33 @@ def assess_fund(
         }
     validate_targets(spec, strategy_records, risk.weights)
 
+    equitization: dict[str, float] = {}
+    if spec.equitize_idle:
+        # Never lever the benchmark: idle capital is what's left of 100% gross.
+        room = min(spec.risk.max_gross_exposure, 1.0) - sum(abs(w) for w in risk.weights.values())
+        if room > WEIGHT_TOLERANCE:
+            if spec.benchmark not in marks:
+                bench, missing = _mark_prices([spec.benchmark], as_of, data_client)
+                if missing:
+                    raise ValueError(f"{spec.benchmark}: no close as of {as_of} to hold idle capital in")
+                marks.update(bench)
+            equitization = {spec.benchmark: room}
+
     return DecisionRecord(
         fund=spec.name, as_of=as_of, spec=spec, universe=universe,
         marks=marks, skipped=skipped, strategies=strategy_records,
         target_weights=netted, clamps=risk.clamps,
         risk_scale_factor=risk.scale_factor, final_weights=risk.weights,
+        equitization=equitization,
     )
+
+
+def target_book(decision: DecisionRecord) -> dict[str, float]:
+    """The complete nonzero book to trade to: the strategies' weights plus any equitization."""
+    book = dict(decision.final_weights)
+    for ticker, weight in decision.equitization.items():
+        book[ticker] = book.get(ticker, 0.0) + weight
+    return {t: w for t, w in book.items() if w != 0}
 
 
 def exact_marks(tickers: list[str], session: str, data_client: DataClient) -> dict[str, float]:
@@ -113,9 +134,13 @@ def exact_marks(tickers: list[str], session: str, data_client: DataClient) -> di
 
 def check_projected_book(
     orders: list[Order], held: dict[str, int], marks: dict[str, float],
-    equity: float, limits: RiskLimits,
+    equity: float, limits: RiskLimits, exempt: frozenset[str] | set[str] = frozenset(),
 ) -> None:
-    """Raise if the book after these orders would breach the fund's hard limits."""
+    """Raise if the book after these orders would breach the fund's hard limits.
+
+    Names in `exempt` (the benchmark holding idle capital) skip the per-name
+    cap — an index is not a concentrated bet — but still count toward gross.
+    """
     projected = dict(held)
     for order in orders:
         projected[order.ticker] = projected.get(order.ticker, 0) + (
@@ -123,7 +148,7 @@ def check_projected_book(
         )
     weights = {t: shares * marks[t] / equity for t, shares in projected.items()}
     for ticker, weight in weights.items():
-        if not isfinite(weight) or abs(weight) > limits.max_position_pct + WEIGHT_TOLERANCE:
+        if not isfinite(weight) or (ticker not in exempt and abs(weight) > limits.max_position_pct + WEIGHT_TOLERANCE):
             raise ValueError(f"{ticker}: projected position violates max_position_pct")
     if sum(abs(w) for w in weights.values()) > limits.max_gross_exposure + WEIGHT_TOLERANCE:
         raise ValueError("projected portfolio violates max_gross_exposure")
@@ -145,14 +170,15 @@ def execute_decision(
     spec = effective.spec
     validate_targets(spec, effective.strategies, effective.final_weights)
     held = broker.positions()
-    targets = {t: w for t, w in effective.final_weights.items() if w != 0}
+    targets = target_book(effective)
     marks = exact_marks(list(set(held) | set(targets)), session, data_client)
     cash_before = broker.cash()
     equity_before = cash_before + sum(p.shares * marks[t] for t, p in held.items())
     if not isfinite(equity_before) or equity_before <= 0:
         raise ValueError(f"{spec.name}: equity on {session} must be finite and positive")
     orders = build_orders(targets, held, marks, equity_before, spec.costs.min_trade_pct)
-    check_projected_book(orders, {t: p.shares for t, p in held.items()}, marks, equity_before, spec.risk)
+    check_projected_book(orders, {t: p.shares for t, p in held.items()}, marks, equity_before, spec.risk,
+                         exempt=set(effective.equitization))
     fills: list[Fill] = [broker.place_order(order) for order in orders]
     positions = {t: p.shares for t, p in broker.positions().items()}
     cash = broker.cash()

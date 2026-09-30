@@ -22,6 +22,7 @@ def test_packaged_paper_mandate_is_valid():
     assert spec.risk.max_position_pct == 0.10 and spec.costs.commission_bps == 5
     assert all(s.blend.max_name_weight == 0.10 for s in spec.strategies)
     assert spec.costs.min_trade_pct == 0.005
+    assert spec.equitize_idle is True
     pead = spec.strategies[-1].models[0]
     assert PEADModel(**pead.params)._decay is True
 

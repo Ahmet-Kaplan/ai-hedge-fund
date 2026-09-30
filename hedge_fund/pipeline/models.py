@@ -54,6 +54,7 @@ class DecisionRecord(BaseModel):
     clamps: list[ClampEvent]
     final_weights: dict[str, float]
     risk_scale_factor: float | None = None
+    equitization: dict[str, float] = Field(default_factory=dict)  # idle capital held in the benchmark
 
 
 class PendingRunResult(BaseModel):
@@ -93,6 +94,7 @@ class CycleRecord(BaseModel):
     cash: float
     nav: float                          # cash + sum(shares * mark)
     risk_scale_factor: float | None = None
+    equitization: dict[str, float] = Field(default_factory=dict)  # idle capital held in the benchmark
     original_assessment: DecisionRecord | None = None
     refreshed_assessment: DecisionRecord | None = None
     execution_as_of: str | None = None

@@ -18,7 +18,7 @@ from hedge_fund.data.sessions import previous_day
 from hedge_fund.fund import Fund
 from hedge_fund.pipeline.execution import build_orders
 from hedge_fund.pipeline.models import DecisionRecord
-from hedge_fund.pipeline.run_cycle import _mark_prices, assess_fund, check_projected_book
+from hedge_fund.pipeline.run_cycle import _mark_prices, assess_fund, check_projected_book, target_book
 
 
 class LivePlan(BaseModel):
@@ -41,7 +41,7 @@ def plan_rebalance(
     """Orders that move `positions` to the fund's targets (or to flat) at `session`'s close."""
     cutoff = previous_day(session)
     decision = None if flatten else assess_fund(fund, cutoff, data_client, universe)
-    targets = {} if decision is None else {t: w for t, w in decision.final_weights.items() if w != 0}
+    targets = {} if decision is None else target_book(decision)
 
     marks = {t: decision.marks[t] for t in targets} if decision is not None else {}
     missing = sorted(t for t in positions if t not in marks)
@@ -55,7 +55,8 @@ def plan_rebalance(
         raise ValueError(f"{fund.spec.name}: equity {equity} must be finite and positive to size orders")
     held = {t: Position(ticker=t, shares=s) for t, s in positions.items() if s}
     orders = build_orders(targets, held, marks, equity, fund.spec.costs.min_trade_pct)
-    check_projected_book(orders, dict(positions), marks, equity, fund.spec.risk)
+    exempt = set(decision.equitization) if decision is not None else set()
+    check_projected_book(orders, dict(positions), marks, equity, fund.spec.risk, exempt=exempt)
     return LivePlan(
         session=session, cutoff=cutoff, decision=decision, marks=marks, equity=equity,
         cash=cash, positions=dict(positions), targets=targets, orders=orders, flatten=flatten,

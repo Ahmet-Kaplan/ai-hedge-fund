@@ -72,6 +72,8 @@ def strategy_attribution(ledger: Ledger, data_client: DataClient) -> dict[str, f
         if not decision:
             continue   # a flatten plan carries no strategy views
         contributions = {s["name"]: s["final_contribution"] for s in decision["strategies"]}
+        if decision.get("equitization"):
+            contributions["idle capital in benchmark"] = decision["equitization"]
         tickers = sorted({t for weights in contributions.values() for t, w in weights.items() if w})
         if not tickers:
             continue

@@ -434,3 +434,23 @@ def test_strategy_gross_violation_is_rejected_even_when_fund_risk_clips_it(monke
     with pytest.raises(ValueError, match="team.*strategy gross target"):
         run_cycle(fund, "2024-06-03", broker, FakeDataClient({"A": 100, "B": 100}), ["A", "B"])
     broker.place_order.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Equitizing idle capital in the benchmark
+# ---------------------------------------------------------------------------
+
+def test_idle_capital_is_held_in_the_benchmark():
+    spec = _spec().model_copy(update={"equitize_idle": True})
+    fund = Fund(spec, models={"solo": [FakeAnalyst("a", views={"AAPL": 1.0})]})
+    record = run_cycle(fund, "2024-06-03", SimBroker(cash=100_000.0), FakeDataClient(CLOSES), UNIVERSE)
+    assert record.final_weights == {"AAPL": pytest.approx(0.25), "MSFT": 0.0, "NVDA": 0.0}
+    assert record.equitization == {"SPY": pytest.approx(0.75)}
+    assert record.positions == {"AAPL": 125, "SPY": 750}   # SPY closes at 100 in the fake
+
+
+def test_equitization_is_off_by_default():
+    fund = Fund(_spec(), models={"solo": [FakeAnalyst("a", views={"AAPL": 1.0})]})
+    record = run_cycle(fund, "2024-06-03", SimBroker(cash=100_000.0), FakeDataClient(CLOSES), UNIVERSE)
+    assert record.equitization == {}
+    assert "SPY" not in record.positions

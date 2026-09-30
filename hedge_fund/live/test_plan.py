@@ -102,3 +102,11 @@ def test_nonpositive_equity_raises():
     fund, _ = make_fund({"AAPL": 1.0})
     with pytest.raises(ValueError, match="equity"):
         plan_rebalance(fund, ["AAPL"], {}, 0.0, FakeDataClient(SERIES), MONDAY)
+
+
+def test_idle_capital_goes_to_the_benchmark_exempt_from_the_name_cap():
+    fund, _ = make_fund({"AAPL": 1.0})
+    fund.spec = fund.spec.model_copy(update={"equitize_idle": True})
+    plan = plan_rebalance(fund, ["AAPL"], {}, 100_000.0, FakeDataClient(SERIES), MONDAY)
+    assert plan.targets == {"AAPL": pytest.approx(0.5), "SPY": pytest.approx(0.5)}
+    assert [(o.side, o.ticker, o.quantity) for o in plan.orders] == [("buy", "AAPL", 500), ("buy", "SPY", 100)]

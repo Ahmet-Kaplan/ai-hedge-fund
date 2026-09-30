@@ -104,6 +104,11 @@ class FundSpec(BaseModel):
         description="what the fund measures itself against; also the source " "of the backtest's trading-day grid",
     )
     costs: CostModel = Field(default_factory=CostModel, description="frictions charged by the backtester")
+    equitize_idle: bool = Field(
+        default=False,
+        description="hold the capital the strategies leave unused in the benchmark, so the fund is "
+        "market exposure plus its active bets and its excess return measures stock selection",
+    )
 
     @field_validator("benchmark")
     @classmethod

@@ -1,7 +1,8 @@
 # The Alpaca paper fund. All four library strategies, long/short, unlevered.
 # Every sleeve caps a name at 10% of the sleeve: since sleeves sum to the fund,
 # no name can breach the fund's 10% cap, so the risk stage never has to shrink
-# the whole book to fix one concentrated pick.
+# the whole book to fix one concentrated pick. Whatever the sleeves leave
+# unused is held in the benchmark, so the fund = market + its active bets.
 # Run it with `aihf-paper` (see README "Paper trading on Alpaca").
 schema_version: 2
 name: paper-fund
@@ -42,6 +43,7 @@ costs:
   commission_bps: 5             # per side, bps of notional
   borrow_bps_annual: 50         # general-collateral large-cap borrow
   min_trade_pct: 0.005          # skip opening/adding trades under 0.5% of equity
+equitize_idle: true             # capital the strategies leave unused is held in SPY
 capital: 100000
 rebalance: weekly
 benchmark: SPY
