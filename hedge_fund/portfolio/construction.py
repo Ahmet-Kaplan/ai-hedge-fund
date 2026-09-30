@@ -34,6 +34,7 @@ def blend_signals(
     mode: PortfolioMode,
     investment_approaches: Mapping[str, InvestmentApproach],
     max_name_weight: float | None = None,
+    volatilities: Mapping[str, float] | None = None,
 ) -> BlendResult:
     """Blend voting opinions, respecting each analyst's permission to short.
 
@@ -51,6 +52,10 @@ def blend_signals(
     goes to the side's other names in proportion to their scores, and what
     the cap cannot place stays in cash. A dollar-neutral sleeve then shrinks
     its larger side to match the smaller, so it stays neutral.
+
+    With volatilities (annualized, per ticker), sizing uses score / volatility
+    so each position carries similar risk; a name without one gets the median.
+    Eligible scores — the evidence — are unchanged.
     Invalid modes, profiles, weights, or signal values raise ValueError.
     """
     if mode not in ("long_only", "long_short", "dollar_neutral"):
@@ -88,11 +93,12 @@ def blend_signals(
     convictions = {t: weighted_sum[t] / weight_total[t] if weight_total.get(t) else 0.0 for t in tickers}
     short_assessments = {t: short_sum[t] / weight_total[t] if weight_total.get(t) else 0.0 for t in tickers}
     scores = {t: max(convictions[t], 0.0) + (min(short_assessments[t], 0.0) if mode != "long_only" else 0.0) for t in tickers}
+    sizing = _risk_scaled(scores, volatilities) if volatilities is not None else scores
     weights = dict.fromkeys(tickers, 0.0)
     flat_reason: FlatReason | None = None
     if mode == "dollar_neutral":
-        longs = sum(max(score, 0.0) for score in scores.values())
-        shorts = sum(-min(score, 0.0) for score in scores.values())
+        longs = sum(max(score, 0.0) for score in sizing.values())
+        shorts = sum(-min(score, 0.0) for score in sizing.values())
         if longs < WEIGHT_TOLERANCE and shorts < WEIGHT_TOLERANCE:
             flat_reason = "no_eligible_positions"
         elif longs < WEIGHT_TOLERANCE:
@@ -100,10 +106,10 @@ def blend_signals(
         elif shorts < WEIGHT_TOLERANCE:
             flat_reason = "missing_short_side"
         elif max_name_weight is None:
-            weights = {t: score / (longs if score > 0 else shorts) * (gross_target / 2) for t, score in scores.items()}
+            weights = {t: score / (longs if score > 0 else shorts) * (gross_target / 2) for t, score in sizing.items()}
         else:
-            long_side = _capped_allocation({t: s for t, s in scores.items() if s > 0}, gross_target / 2, max_name_weight)
-            short_side = _capped_allocation({t: -s for t, s in scores.items() if s < 0}, gross_target / 2, max_name_weight)
+            long_side = _capped_allocation({t: s for t, s in sizing.items() if s > 0}, gross_target / 2, max_name_weight)
+            short_side = _capped_allocation({t: -s for t, s in sizing.items() if s < 0}, gross_target / 2, max_name_weight)
             placed = min(sum(long_side.values()), sum(short_side.values()))
             long_scale = placed / sum(long_side.values())
             short_scale = placed / sum(short_side.values())
@@ -111,14 +117,14 @@ def blend_signals(
             weights.update({t: w * long_scale for t, w in long_side.items()})
             weights.update({t: -w * short_scale for t, w in short_side.items()})
     else:
-        gross = sum(abs(score) for score in scores.values())
+        gross = sum(abs(score) for score in sizing.values())
         if gross < WEIGHT_TOLERANCE:
             flat_reason = "no_eligible_positions"
         elif max_name_weight is None:
-            weights = {t: score / gross * gross_target for t, score in scores.items()}
+            weights = {t: score / gross * gross_target for t, score in sizing.items()}
         else:
-            placed = _capped_allocation({t: abs(s) for t, s in scores.items() if s != 0}, gross_target, max_name_weight)
-            weights = {t: placed.get(t, 0.0) * (1 if score > 0 else -1) for t, score in scores.items()}
+            placed = _capped_allocation({t: abs(s) for t, s in sizing.items() if s != 0}, gross_target, max_name_weight)
+            weights = {t: placed.get(t, 0.0) * (1 if score > 0 else -1) for t, score in sizing.items()}
 
     return BlendResult(convictions=convictions, eligible_scores=scores, weights=weights, flat_reason=flat_reason)
 
@@ -144,3 +150,15 @@ def _capped_allocation(scores: dict[str, float], budget: float, cap: float) -> d
             left -= cap
             del remaining[t]
     return allocation
+
+
+def _risk_scaled(scores: dict[str, float], volatilities: Mapping[str, float]) -> dict[str, float]:
+    """Divide each score by its volatility; names without a usable one get the median."""
+    usable = sorted(v for v in volatilities.values() if isfinite(v) and v > 0)
+    if not usable:
+        return dict(scores)
+    median = usable[len(usable) // 2] if len(usable) % 2 else (usable[len(usable) // 2 - 1] + usable[len(usable) // 2]) / 2
+    def vol(t: str) -> float:
+        v = volatilities.get(t)
+        return v if v is not None and isfinite(v) and v > 0 else median
+    return {t: s / vol(t) for t, s in scores.items()}

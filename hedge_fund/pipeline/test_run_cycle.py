@@ -454,3 +454,17 @@ def test_equitization_is_off_by_default():
     record = run_cycle(fund, "2024-06-03", SimBroker(cash=100_000.0), FakeDataClient(CLOSES), UNIVERSE)
     assert record.equitization == {}
     assert "SPY" not in record.positions
+
+
+def test_inverse_vol_sizing_reads_price_history():
+    from hedge_fund.backtesting.test_fund import FakeDataClient as SeriesClient
+    from hedge_fund.pipeline.run_cycle import assess_fund
+    from datetime import date, timedelta
+    days = [(date(2024, 3, 1) + timedelta(days=i)).isoformat() for i in range(95)]
+    calm = {d: 100 * (1.005 if i % 2 else 0.995) for i, d in enumerate(days)}
+    wild = {d: 100 * (1.02 if i % 2 else 0.98) for i, d in enumerate(days)}
+    spec = _spec(strategies=[{"name": "solo", "models": [{"name": "a"}],
+                              "blend": {"mode": "long_short", "sizing": "inverse_vol"}}], max_position_pct=1.0)
+    fund = Fund(spec, models={"solo": [FakeAnalyst("a", views={"CALM": 1.0, "WILD": 1.0})]})
+    decision = assess_fund(fund, days[-1], SeriesClient({"CALM": calm, "WILD": wild, "SPY": calm}), ["CALM", "WILD"])
+    assert decision.final_weights["CALM"] == pytest.approx(0.8, abs=0.01)   # 4x calmer → 4x the weight

@@ -197,3 +197,30 @@ def test_cap_keeps_dollar_neutral_sides_equal():
 def test_no_cap_is_unchanged():
     signals = [_sig("a", "A", 0.9), _sig("a", "B", 0.1)]
     assert _capped(signals, cap=None).weights == blend_signals(signals, {"a": 1.0}, 1.0).weights
+
+
+# ---------------------------------------------------------------------------
+# Inverse-volatility sizing
+# ---------------------------------------------------------------------------
+
+def _sized(signals, vols, mode="long_short", cap=None):
+    return _blend_signals(signals, {"a": 1.0}, 1.0, mode=mode, investment_approaches={"a": "long_short"},
+                          max_name_weight=cap, volatilities=vols)
+
+
+def test_equal_conviction_calm_name_gets_more():
+    weights = _sized([_sig("a", "CALM", 0.5), _sig("a", "WILD", 0.5)], {"CALM": 0.2, "WILD": 0.4}).weights
+    assert weights["CALM"] == pytest.approx(2 / 3) and weights["WILD"] == pytest.approx(1 / 3)
+
+
+def test_missing_volatility_uses_the_median():
+    weights = _sized([_sig("a", "A", 0.5), _sig("a", "B", 0.5), _sig("a", "C", 0.5)], {"A": 0.2, "B": 0.4}).weights
+    assert weights["C"] == pytest.approx(weights["A"] * 0.2 / 0.3)
+
+
+def test_inverse_vol_keeps_evidence_and_neutrality():
+    signals = [_sig("a", "L1", 0.5), _sig("a", "L2", 0.5), _sig("a", "S", -0.5)]
+    result = _sized(signals, {"L1": 0.1, "L2": 0.3, "S": 0.2}, mode="dollar_neutral")
+    assert result.eligible_scores == _sized(signals, None, mode="dollar_neutral").eligible_scores
+    assert sum(result.weights.values()) == pytest.approx(0.0)
+    assert result.weights["L1"] == pytest.approx(3 * result.weights["L2"])
