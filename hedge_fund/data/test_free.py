@@ -22,8 +22,9 @@ class FakePrices:
         self.closes = closes      # {ticker: {date: close}}
         self.calls = []
 
-    def fetch(self, tickers, start, end):
-        self.calls.append((tuple(tickers), start, end))
+    def fetch(self, tickers, start, end, adjustment="all"):
+        if adjustment == "all":
+            self.calls.append((tuple(tickers), start, end))
         return {t: [bar(d, c) for d, c in sorted(self.closes.get(t, {}).items()) if start <= d <= end]
                 for t in tickers if self.closes.get(t)}
 
@@ -52,7 +53,7 @@ class Clock:
         return self.now
 
 
-CLOSES = {"TEST": {"2026-07-31": 50.0, "2026-08-03": 51.0}, "SPY": {"2026-08-03": 500.0}}
+CLOSES = {"TEST": {"2026-06-30": 50.0, "2026-07-31": 50.0, "2026-08-03": 51.0}, "SPY": {"2026-08-03": 500.0}}
 
 
 def client(tmp_path, prices=None, sec=None, clock=None):
@@ -72,7 +73,7 @@ def test_prices_download_history_once_then_read_locally(tmp_path):
     c.get_prices("TEST", "2026-07-31", "2026-07-31")
     assert len(prices.calls) == 1                       # inside the stored range
     c.get_prices("TEST", "2026-08-01", "2026-08-10")
-    assert prices.calls[-1] == (("TEST",), "2026-08-04", "2026-08-10")   # only the missing tail
+    assert prices.calls[-1] == (("TEST",), "2026-08-03", "2026-08-10")   # the missing tail + one overlap day
 
 
 def test_prefetch_batches_tickers(tmp_path):
@@ -87,7 +88,7 @@ def test_prefetch_batches_tickers(tmp_path):
 def test_fundamentals_from_sec_with_market_cap_from_stored_prices(tmp_path):
     rows = client(tmp_path).get_financial_metrics("TEST", "2026-08-15", limit=2)
     assert [r.report_period for r in rows] == ["2026-06-30", "2025-12-31"]
-    assert rows[0].market_cap == pytest.approx(10 * 50.0)   # close on the 2026-08-01 filing date's last session
+    assert rows[0].market_cap == pytest.approx(10 * 50.0)   # close on or before the 2026-08-01 filing date
     assert client(tmp_path).get_financial_metrics("TEST", "2026-07-15", limit=1)[0].report_period == "2025-12-31"
     with pytest.raises(ValueError, match="ttm"):
         client(tmp_path).get_financial_metrics("TEST", "2026-08-15", period="quarterly")
@@ -128,3 +129,34 @@ def test_company_facts_earnings_and_unused_endpoints(tmp_path):
     assert c.get_news("TEST", "2026-09-29") == [] and c.get_insider_trades("TEST", "2026-09-29") == []
     assert c.get_earnings("TEST") is None
     assert c.get_market_cap("TEST", "2026-08-15") == pytest.approx(500.0)
+
+
+def test_market_cap_uses_raw_prices_across_a_split(tmp_path):
+    class SplitPrices(FakePrices):
+        def fetch(self, tickers, start, end, adjustment="all"):
+            out = super().fetch(tickers, start, end)
+            if adjustment == "raw":   # before a later 10:1 split the stock traded 10x higher
+                out = {t: [bar(p.time[:10], p.close * 10) for p in bars] for t, bars in out.items()}
+            return out
+    c = client(tmp_path, prices=SplitPrices(CLOSES))
+    assert c.get_prices("TEST", "2026-07-31", "2026-07-31")[0].close == 50.0     # returns stay adjusted
+    assert c.get_financial_metrics("TEST", "2026-08-15", limit=1)[0].market_cap == pytest.approx(10 * 500.0)
+
+
+def test_a_new_split_refreshes_the_stored_history(tmp_path):
+    prices = FakePrices({"TEST": {"2026-07-31": 50.0, "2026-08-03": 51.0}})
+    c = client(tmp_path, prices=prices)
+    c.get_prices("TEST", "2026-07-31", "2026-08-03")
+    # A 2:1 split on 2026-08-04: Alpaca now reports every earlier close halved.
+    prices.closes["TEST"] = {"2026-07-31": 25.0, "2026-08-03": 25.5, "2026-08-04": 26.0}
+    assert [p.close for p in c.get_prices("TEST", "2026-07-31", "2026-08-04")] == [25.0, 25.5, 26.0]
+    assert prices.calls[-1] == (("TEST",), PRICE_HISTORY_START, "2026-08-04")    # full refresh
+
+
+def test_unchanged_history_only_fetches_the_tail(tmp_path):
+    prices = FakePrices({"TEST": {"2026-07-31": 50.0, "2026-08-03": 51.0}})
+    c = client(tmp_path, prices=prices)
+    c.get_prices("TEST", "2026-07-31", "2026-08-03")
+    prices.closes["TEST"]["2026-08-04"] = 52.0
+    c.get_prices("TEST", "2026-07-31", "2026-08-04")
+    assert prices.calls[-1] == (("TEST",), "2026-08-03", "2026-08-04")   # overlaps one stored day to check it

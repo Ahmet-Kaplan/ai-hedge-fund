@@ -29,13 +29,17 @@ class AlpacaPriceSource:
         self._session = session or requests.Session()
         self._session.headers.update({"APCA-API-KEY-ID": key_id, "APCA-API-SECRET-KEY": secret_key})
 
-    def fetch(self, tickers: list[str], start: str, end: str) -> dict[str, list[Price]]:
-        """Daily bars in [start, end] per ticker, oldest first. Tickers without bars are absent."""
+    def fetch(self, tickers: list[str], start: str, end: str, adjustment: str = "all") -> dict[str, list[Price]]:
+        """Daily bars in [start, end] per ticker, oldest first. Tickers without bars are absent.
+
+        adjustment="all" (split + dividend adjusted) for returns; "raw" for
+        prices as traded, which market caps need.
+        """
         out: dict[str, list[Price]] = {}
         for i in range(0, len(tickers), _SYMBOLS_PER_REQUEST):
             chunk = tickers[i:i + _SYMBOLS_PER_REQUEST]
             params = {"symbols": ",".join(chunk), "timeframe": "1Day", "start": start, "end": end,
-                      "adjustment": "all", "feed": "sip", "limit": 10000}
+                      "adjustment": adjustment, "feed": "sip", "limit": 10000}
             while True:
                 try:
                     resp = self._session.get(BARS_URL, params=params, timeout=self._timeout)

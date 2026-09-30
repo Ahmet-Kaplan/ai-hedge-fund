@@ -3,6 +3,25 @@ Financial Datasets' /financial-metrics and /earnings.
 
 Pure functions: facts in (already limited to what was filed by the as-of
 date), rows out. Nothing here touches the network or the database.
+
+Checked against 112 archived Financial Datasets rows (32 large caps, Sep 2025
+to Jun 2026). Agreement: current ratio, gross margin, free cash flow/share
+100%; book value/share, net margin 97-98%; operating margin, ROE, EPS,
+revenue growth 91-95%; filing date 88% exact (the rest are one day later —
+Financial Datasets dates by the earnings press release, this by the 10-Q, so
+never earlier). Deliberate or known differences:
+- debt/equity: Financial Datasets double-counts the current portion of
+  long-term debt (Apple ~10% higher) and, in many 10-Q rows, omits long-term
+  debt entirely (GE, KO, CVX, JPM ~0.1 vs ~1.1); Walmart's finance leases are
+  not counted as debt here.
+- market cap / P/E: valued at the filing date with the as-traded close;
+  Financial Datasets mixes period-end and filing-date prices and undercounts
+  multi-class issuers (Alphabet).
+- banks' revenue growth and Disney's operating margin follow each filer's
+  own tags and differ from Financial Datasets' normalization.
+- Berkshire's per-share figures mix A/B share classes; ExxonMobil's pre-2026
+  history sits under a predecessor registrant; SEC's company-facts feed can
+  lag a new 10-Q by weeks (KO, NEE in Aug-Sep 2026), leaving the prior quarter.
 """
 
 from __future__ import annotations
@@ -20,12 +39,28 @@ from hedge_fund.data.store import Fact
 REVENUE = ["RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet",
            "RevenuesNetOfInterestExpense", "RevenueFromContractWithCustomerIncludingAssessedTax"]
 EQUITY = ["StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"]
-DEBT_PARTS = ["LongTermDebtNoncurrent", "LongTermDebtCurrent", "CommercialPaper", "ShortTermBorrowings"]
-DEBT_TOTAL = "LongTermDebt"   # used when the noncurrent/current split is not reported
+COST_OF_REVENUE = ["CostOfRevenue", "CostOfGoodsAndServicesSold"]   # gross profit = revenue − this when untagged
+CAPEX = ["PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets"]
+# Total debt, most complete label first:
+#   1. the combined long- and short-term amount, when a filer tags it (GE);
+#   2. else noncurrent long-term debt + DebtCurrent, when a filer reports all
+#      current debt as one line (PG);
+#   3. else long-term debt including its current portion (a total label, or
+#      noncurrent + current) plus commercial paper, short-term borrowings and
+#      notes payable.
+# Financial Datasets adds the current portion of long-term debt twice, so its
+# debt/equity runs ~5-15% higher for issuers like Apple; this is deliberate.
+DEBT_COMBINED = "DebtLongtermAndShorttermCombinedAmount"
+LONG_TERM_DEBT_TOTAL = ["LongTermDebt", "LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities"]
+LONG_TERM_DEBT_NONCURRENT = ["LongTermDebtNoncurrent", "LongTermDebtAndCapitalLeaseObligations"]
+LONG_TERM_DEBT_CURRENT = ["LongTermDebtCurrent", "LongTermDebtAndCapitalLeaseObligationsCurrent"]
+SHORT_TERM_DEBT = ["CommercialPaper", "ShortTermBorrowings", "NotesAndLoansPayable"]
+DEBT_CURRENT_TOTAL = "DebtCurrent"
 
-US_GAAP = [*REVENUE, "GrossProfit", "OperatingIncomeLoss", "NetIncomeLoss",
-           "NetCashProvidedByUsedInOperatingActivities", "PaymentsToAcquirePropertyPlantAndEquipment",
-           *EQUITY, "AssetsCurrent", "LiabilitiesCurrent", *DEBT_PARTS, DEBT_TOTAL,
+US_GAAP = [*REVENUE, "GrossProfit", *COST_OF_REVENUE, "OperatingIncomeLoss", "NetIncomeLoss",
+           "NetCashProvidedByUsedInOperatingActivities", *CAPEX,
+           *EQUITY, "AssetsCurrent", "LiabilitiesCurrent", DEBT_COMBINED, *LONG_TERM_DEBT_TOTAL,
+           *LONG_TERM_DEBT_NONCURRENT, *LONG_TERM_DEBT_CURRENT, *SHORT_TERM_DEBT, DEBT_CURRENT_TOTAL,
            "WeightedAverageNumberOfDilutedSharesOutstanding", "EarningsPerShareDiluted"]
 DEI = ["EntityCommonStockSharesOutstanding"]
 CONCEPTS = US_GAAP + DEI
@@ -139,8 +174,14 @@ def quarter_ends(facts_by_concept: dict[str, list[Fact]]) -> list[tuple[str, str
 def metrics_rows(
     ticker: str, facts_by_concept: dict[str, list[Fact]],
     close_on_or_before: Callable[[str], float | None], limit: int,
+    derive_gross_profit: bool = True,
 ) -> list[FinancialMetrics]:
-    """Trailing-twelve-month metric rows, newest first, as Financial Datasets defines them."""
+    """Trailing-twelve-month metric rows, newest first, as Financial Datasets defines them.
+
+    `derive_gross_profit=False` (banks, insurers) stops gross profit being
+    computed as revenue − cost of goods: those filers tag only a small product
+    cost, and the result would be a meaningless ~90% "gross margin".
+    """
     periods = {c: latest_by_period(facts_by_concept.get(c, [])) for c in CONCEPTS}
 
     def flow(concepts: list[str], end: str, tolerance: int = 3) -> float | None:
@@ -154,20 +195,27 @@ def metrics_rows(
         revenue = flow(REVENUE, end)
         revenue_prior = flow(REVENUE, _shift(end, -365), tolerance=7)
         gross = flow(["GrossProfit"], end)
+        if gross is None and derive_gross_profit and revenue is not None and (cost := flow(COST_OF_REVENUE, end)) is not None:
+            gross = revenue - cost
         operating = flow(["OperatingIncomeLoss"], end)
         net = flow(["NetIncomeLoss"], end)
         cash_ops = flow(["NetCashProvidedByUsedInOperatingActivities"], end)
-        capex = flow(["PaymentsToAcquirePropertyPlantAndEquipment"], end)
+        capex = flow(CAPEX, end)
         equity = stock(EQUITY, end)
         assets_current = stock(["AssetsCurrent"], end)
         liabilities_current = stock(["LiabilitiesCurrent"], end)
-        debt_parts = [v for c in DEBT_PARTS if (v := stock([c], end)) is not None]
-        debt = sum(debt_parts) if debt_parts else stock([DEBT_TOTAL], end)
+        debt = _total_debt(stock, end)
         diluted = [x for x in _duration_facts(periods["WeightedAverageNumberOfDilutedSharesOutstanding"], end, 3)]
         diluted_shares = min(diluted, key=lambda x: _days(x.start, x.end)).value if diluted else None
-        cover = [x for x in facts_by_concept.get("EntityCommonStockSharesOutstanding", []) if x.filed <= filed]
-        shares = max(cover, key=lambda x: (x.filed, x.end)).value if cover else None
+        cover_shares = _cover_shares(facts_by_concept.get("EntityCommonStockSharesOutstanding", []), end, filed)
+        if diluted_shares and cover_shares and not 0.5 < diluted_shares / cover_shares < 2:
+            diluted_shares = cover_shares   # mis-scaled tag (McDonald's reports diluted shares in millions)
+        shares = cover_shares or diluted_shares
+        # Valued when the numbers became public: cover-page shares × the close on the filing
+        # date. (Financial Datasets' timing is inconsistent — some rows use the period end,
+        # some the filing date — so it is not matched here.)
         close = close_on_or_before(filed)
+        reported_eps = flow(["EarningsPerShareDiluted"], end)
         market_cap = shares * close if shares and close else None
 
         rows.append(FinancialMetrics(
@@ -181,9 +229,11 @@ def metrics_rows(
             debt_to_equity=debt / equity if debt is not None and equity and equity > 0 else None,
             current_ratio=assets_current / liabilities_current if assets_current is not None and liabilities_current else None,
             revenue_growth=revenue / revenue_prior - 1 if revenue is not None and revenue_prior else None,
-            earnings_per_share=net / diluted_shares if net is not None and diluted_shares else None,
+            # Net income / diluted shares, as Financial Datasets computes it; it is also
+            # split-proof, unlike summing reported EPS across a split (Netflix 2025).
+            earnings_per_share=net / diluted_shares if net is not None and diluted_shares else reported_eps,
             book_value_per_share=equity / shares if equity is not None and shares else None,
-            free_cash_flow_per_share=(cash_ops - (capex or 0.0)) / shares if cash_ops is not None and shares else None,
+            free_cash_flow_per_share=(cash_ops - capex) / shares if cash_ops is not None and capex is not None and shares else None,
         ))
     return rows
 
@@ -252,3 +302,33 @@ def _announcement(end: str, filings: list[dict]) -> tuple[str, str] | None:
     if reports:
         return reports[0][1].split("/")[0], reports[0][0]
     return None
+
+
+def _total_debt(stock: Callable[[list[str], str], float | None], end: str) -> float | None:
+    combined = stock([DEBT_COMBINED], end)
+    if combined is not None:
+        return combined
+    current_total = stock([DEBT_CURRENT_TOTAL], end)
+    noncurrent = stock(LONG_TERM_DEBT_NONCURRENT, end)
+    if current_total is not None and noncurrent is not None:
+        return noncurrent + current_total
+    long_term = stock(LONG_TERM_DEBT_TOTAL, end)
+    if long_term is None:
+        split = [v for v in (noncurrent, stock(LONG_TERM_DEBT_CURRENT, end)) if v is not None]
+        long_term = sum(split) if split else None
+    short_term = [v for c in SHORT_TERM_DEBT if (v := stock([c], end)) is not None]
+    if long_term is None and not short_term:
+        return None
+    return (long_term or 0.0) + sum(short_term)
+
+
+def _cover_shares(cover: list[Fact], end: str, filed: str) -> float | None:
+    """Shares outstanding from the cover page of the latest filing by `filed`.
+
+    Multi-class filers (Visa, Alphabet) tag per-class counts only, which SEC's
+    company-facts feed leaves out; what remains is an old undimensioned count
+    (Visa's is from 2010). A count dated more than a month before the period
+    end is therefore stale and ignored — the caller falls back to diluted shares.
+    """
+    public = [x for x in cover if x.filed <= filed and _days(end, x.end) >= -30]
+    return max(public, key=lambda x: (x.filed, x.end)).value if public else None

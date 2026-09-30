@@ -183,3 +183,70 @@ def test_sue_events_drive_pead():
             return earnings_events(ticker, eps_facts(), FILINGS, limit)
 
     assert PEADModel().predict("TEST", "2026-07-27", Client()).value == 1.0
+
+
+def test_definition_fallbacks_match_financial_datasets():
+    facts = company()
+    # Gross profit from revenue − cost of revenue when not tagged directly.
+    gross = {(x.start, x.end): x for x in facts.pop("GrossProfit")}
+    revenue = {(x.start, x.end): x for x in facts["RevenueFromContractWithCustomerExcludingAssessedTax"]}
+    facts["CostOfGoodsAndServicesSold"] = [f("CostOfGoodsAndServicesSold", s, e, revenue[(s, e)].value - g.value, g.filed, g.form)
+                                           for (s, e), g in gross.items()]
+    # Capex under the productive-assets label.
+    facts["PaymentsToAcquireProductiveAssets"] = [f("PaymentsToAcquireProductiveAssets", x.start, x.end, x.value, x.filed, x.form)
+                                                  for x in facts.pop("PaymentsToAcquirePropertyPlantAndEquipment")]
+    # Total long-term debt (already includes the current portion) wins over the split.
+    facts["LongTermDebt"] = [f("LongTermDebt", None, "2026-06-30", 120, "2026-08-01")]
+    facts["CommercialPaper"] = [f("CommercialPaper", None, "2026-06-30", 5, "2026-08-01")]
+    # Reported EPS is only a fallback: net income / diluted shares is split-proof.
+    facts["EarningsPerShareDiluted"] = [f("EarningsPerShareDiluted", "2025-01-01", "2025-12-31", 8.0, "2026-02-10", "10-K", "USD/shares"),
+                                        f("EarningsPerShareDiluted", "2025-01-01", "2025-06-30", 3.8, "2025-08-01", unit="USD/shares"),
+                                        f("EarningsPerShareDiluted", "2026-01-01", "2026-06-30", 4.4, "2026-08-01", unit="USD/shares")]
+    row = metrics_rows("TEST", facts, close_50, limit=1)[0]
+    assert row.gross_margin == pytest.approx(215 / 430)
+    assert row.free_cash_flow_per_share == pytest.approx((135 - 23) / 10)
+    assert row.debt_to_equity == pytest.approx(125 / 500)
+    assert row.earnings_per_share == pytest.approx(86 / 10)
+
+
+def test_market_cap_uses_the_close_on_the_filing_date():
+    closes = {"2026-06-30": 40.0, "2026-08-01": 50.0}
+    row = metrics_rows("TEST", company(), lambda day: closes.get(day), limit=1)[0]
+    assert row.market_cap == pytest.approx(500)
+
+
+def test_no_capex_means_no_free_cash_flow():
+    facts = company()
+    del facts["PaymentsToAcquirePropertyPlantAndEquipment"]
+    assert metrics_rows("TEST", facts, close_50, limit=1)[0].free_cash_flow_per_share is None
+
+
+def test_debt_labels_combined_and_current_total():
+    facts = company()
+    facts["DebtCurrent"] = [f("DebtCurrent", None, "2026-06-30", 30, "2026-08-01")]
+    assert metrics_rows("TEST", facts, close_50, limit=1)[0].debt_to_equity == pytest.approx((90 + 30) / 500)
+    facts["DebtLongtermAndShorttermCombinedAmount"] = [f("DebtLongtermAndShorttermCombinedAmount", None, "2026-06-30", 200, "2026-08-01")]
+    assert metrics_rows("TEST", facts, close_50, limit=1)[0].debt_to_equity == pytest.approx(200 / 500)
+
+
+def test_stale_cover_share_count_falls_back_to_diluted_shares():
+    facts = company()
+    # Multi-class filers (Visa) stopped tagging an undimensioned share count years ago.
+    facts["EntityCommonStockSharesOutstanding"] = [f("EntityCommonStockSharesOutstanding", None, "2010-01-27", 2.5, "2010-02-03", unit="shares")]
+    row = metrics_rows("TEST", facts, close_50, limit=1)[0]
+    assert row.book_value_per_share == pytest.approx(500 / 10)      # diluted shares, not the 2010 count
+
+
+def test_financial_companies_get_no_gross_margin_from_partial_costs():
+    facts = company()
+    gross = facts.pop("GrossProfit")
+    facts["CostOfGoodsAndServicesSold"] = [f("CostOfGoodsAndServicesSold", g.start, g.end, 1, g.filed, g.form) for g in gross]
+    assert metrics_rows("TEST", facts, close_50, limit=1, derive_gross_profit=False)[0].gross_margin is None
+
+
+def test_mis_scaled_diluted_share_count_is_not_trusted():
+    facts = company()
+    # McDonald's-style: diluted shares tagged in millions.
+    facts["WeightedAverageNumberOfDilutedSharesOutstanding"] = [
+        f("WeightedAverageNumberOfDilutedSharesOutstanding", "2026-04-01", "2026-06-30", 10e-6, "2026-08-01", unit="shares")]
+    assert metrics_rows("TEST", facts, close_50, limit=1)[0].earnings_per_share == pytest.approx(86 / 10)

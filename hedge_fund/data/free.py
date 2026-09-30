@@ -4,7 +4,10 @@ Prices come from Alpaca market data, fundamentals and earnings from SEC
 EDGAR; both are fetched into MarketStore once and read locally after:
 
 - prices: the first request for a ticker downloads its history since 2016;
-  later requests fetch only days the database doesn't hold yet.
+  later requests fetch only days the database doesn't hold yet, plus the last
+  stored day as a check. Adjusted prices are rewritten after every split and
+  dividend, so if that day no longer matches, the ticker's whole history is
+  re-downloaded (otherwise a split would appear as a crash).
 - SEC: a company is re-synced only when its stored copy is over 20 hours old
   AND the request is about a date on/after that sync (a backtest about July
   never refetches). If SEC is unreachable, a stored copy is used with a
@@ -14,7 +17,7 @@ EDGAR; both are fetched into MarketStore once and read locally after:
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from hedge_fund.data.alpaca_prices import AlpacaPriceSource
@@ -30,10 +33,6 @@ logger = logging.getLogger(__name__)
 PRICE_HISTORY_START = "2016-01-01"   # Alpaca's consolidated daily history begins here
 SEC_STALE_AFTER = timedelta(hours=20)
 _FILING_FORMS = ["8-K", "8-K/A", "10-Q", "10-Q/A", "10-K", "10-K/A"]
-
-
-def _next_day(day: str) -> str:
-    return (date.fromisoformat(day) + timedelta(days=1)).isoformat()
 
 
 class FreeDataClient:
@@ -77,22 +76,38 @@ class FreeDataClient:
             if start < first:
                 windows.setdefault((start, first), []).append(ticker)
             if end > through:
-                windows.setdefault((_next_day(through), end), []).append(ticker)
+                windows.setdefault((through, end), []).append(ticker)   # overlaps one stored day
         for (lo, hi), group in windows.items():
             fetched = self._prices.fetch(group, lo, hi)
+            raw = self._prices.fetch(group, lo, hi, adjustment="raw")
             for ticker in group:
-                self._store.upsert_prices(ticker, fetched.get(ticker, []))
+                bars = fetched.get(ticker, [])
                 held = self._store.price_range(ticker)
+                if held and lo == held[1] and self._history_rewritten(ticker, lo, bars):
+                    self._refresh_history(ticker, hi)
+                    continue
+                raw_closes = {bar.time[:10]: bar.close for bar in raw.get(ticker, [])}
+                self._store.upsert_prices(ticker, bars, raw_closes)
                 first = min(lo, held[0]) if held else lo
                 through = max(hi, held[1]) if held else hi
                 self._store.set_price_range(ticker, first, through)
 
+    def _history_rewritten(self, ticker: str, day: str, bars: list[Price]) -> bool:
+        stored = self._store.prices(ticker, day, day)
+        fresh = [bar for bar in bars if bar.time[:10] == day]
+        return bool(stored and fresh) and abs(fresh[0].close / stored[0].close - 1) > 1e-4
+
+    def _refresh_history(self, ticker: str, end: str) -> None:
+        logger.info("%s: adjusted history changed (split or dividend); re-downloading", ticker)
+        bars = self._prices.fetch([ticker], PRICE_HISTORY_START, end).get(ticker, [])
+        raw = self._prices.fetch([ticker], PRICE_HISTORY_START, end, adjustment="raw").get(ticker, [])
+        self._store.delete_prices(ticker)
+        self._store.upsert_prices(ticker, bars, {bar.time[:10]: bar.close for bar in raw})
+        self._store.set_price_range(ticker, PRICE_HISTORY_START, end)
+
     def _close_on_or_before(self, ticker: str) -> Callable[[str], float | None]:
-        def close(day: str) -> float | None:
-            start = (date.fromisoformat(day) - timedelta(days=10)).isoformat()
-            bars = self._store.prices(ticker, start, day)
-            return bars[-1].close if bars else None
-        return close
+        # As traded, not split-adjusted: the share count it multiplies is as filed then.
+        return lambda day: self._store.raw_close(ticker, day)
 
     # -- SEC -------------------------------------------------------------------
 
@@ -119,7 +134,9 @@ class FreeDataClient:
         cik = self._cik(ticker, end_date)
         facts = self._store.facts(cik, CONCEPTS, filed_lte=end_date)
         self._ensure_prices([ticker], PRICE_HISTORY_START, min(end_date, completed_through()))
-        return metrics_rows(ticker, facts, self._close_on_or_before(ticker), limit)
+        sic = self._store.company(ticker)["sic"]
+        financial = sic is not None and 6000 <= sic <= 6799   # banks, insurers: no meaningful gross profit
+        return metrics_rows(ticker, facts, self._close_on_or_before(ticker), limit, derive_gross_profit=not financial)
 
     def get_company_facts(self, ticker: str) -> CompanyFacts | None:
         self._cik(ticker, self._now().date().isoformat())

@@ -18,6 +18,7 @@ from hedge_fund.data.models import Price
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS prices (
     ticker TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER,
+    raw_close REAL,   -- as traded that day (not split-adjusted), for market caps
     PRIMARY KEY (ticker, date));
 CREATE TABLE IF NOT EXISTS price_sync (ticker TEXT PRIMARY KEY, first_date TEXT, synced_through TEXT);
 CREATE TABLE IF NOT EXISTS sec_companies (
@@ -67,12 +68,29 @@ class MarketStore:
 
     # -- prices ----------------------------------------------------------------
 
-    def upsert_prices(self, ticker: str, bars: list[Price]) -> None:
+    def upsert_prices(self, ticker: str, bars: list[Price], raw_closes: dict[str, float] | None = None) -> None:
+        """Store adjusted bars; `raw_closes` (date → as-traded close) goes alongside."""
+        raw_closes = raw_closes or {}
         with self._db:
             self._db.executemany(
-                "INSERT OR REPLACE INTO prices VALUES (?,?,?,?,?,?,?)",
-                [(ticker, b.time[:10], b.open, b.high, b.low, b.close, b.volume) for b in bars],
+                "INSERT OR REPLACE INTO prices VALUES (?,?,?,?,?,?,?,?)",
+                [(ticker, b.time[:10], b.open, b.high, b.low, b.close, b.volume, raw_closes.get(b.time[:10]))
+                 for b in bars],
             )
+
+    def delete_prices(self, ticker: str) -> None:
+        with self._db:
+            self._db.execute("DELETE FROM prices WHERE ticker=?", (ticker,))
+            self._db.execute("DELETE FROM price_sync WHERE ticker=?", (ticker,))
+
+    def raw_close(self, ticker: str, on_or_before: str, max_age_days: int = 10) -> float | None:
+        """The as-traded close on the latest session at or before a date."""
+        row = self._db.execute(
+            "SELECT raw_close FROM prices WHERE ticker=? AND date <= ? AND date >= date(?, ?) "
+            "AND raw_close IS NOT NULL ORDER BY date DESC LIMIT 1",
+            (ticker, on_or_before, on_or_before, f"-{max_age_days} days"),
+        ).fetchone()
+        return row[0] if row else None
 
     def prices(self, ticker: str, start: str, end: str) -> list[Price]:
         rows = self._db.execute(
