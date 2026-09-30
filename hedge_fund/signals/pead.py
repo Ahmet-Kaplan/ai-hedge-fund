@@ -35,6 +35,11 @@ class PEADModel(QuantModel):
     surprise fires days to weeks after the market already priced the
     beat or miss. Set ``announcement_only=False`` to restore the old
     10-Q/K fallback.
+
+    With ``decay=True`` the view is held for the whole window and fades
+    linearly with the event's age: ``±(1 - age_days / signal_window_days)``.
+    Drift plays out over weeks, so a weekly rebalance needs a window that
+    long to see most announcements at all.
     """
 
     investment_approach = "long_short"
@@ -45,10 +50,14 @@ class PEADModel(QuantModel):
         earnings_limit: int = 8,
         signal_window_days: int = 4,
         announcement_only: bool = True,
+        decay: bool = False,
     ) -> None:
+        if decay and signal_window_days <= 0:
+            raise ValueError("decay needs a positive signal_window_days")
         self._earnings_limit = earnings_limit
         self._signal_window_days = signal_window_days
         self._announcement_only = announcement_only
+        self._decay = decay
         # Cache earnings history per ticker — predict is called once per
         # trading day during a backtest, so we fetch each ticker only once.
         self._cache: dict[str, list[EarningsRecord]] = {}
@@ -71,11 +80,14 @@ class PEADModel(QuantModel):
         filed = _parse_date(event["filing_date"])
 
         # Only fire if the event is fresh (we just learned about it)
-        if (as_of - filed).days > self._signal_window_days:
+        age_days = (as_of - filed).days
+        if age_days > self._signal_window_days:
             return self._neutral(ticker, date)
 
         surprise = event["surprise"]
         value = 1.0 if surprise == "BEAT" else -1.0
+        if self._decay:
+            value *= 1 - age_days / self._signal_window_days
         return Signal(
             model_name=self.name,
             ticker=ticker,
@@ -90,6 +102,7 @@ class PEADModel(QuantModel):
                 "source_type": event["source_type"],
                 "report_period": event["report_period"],
                 "filing_date": event["filing_date"],
+                "age_days": age_days,
             },
         )
 

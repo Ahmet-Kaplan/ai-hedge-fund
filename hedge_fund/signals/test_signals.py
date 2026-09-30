@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from hedge_fund.data.models import EarningsData, EarningsRecord
 from hedge_fund.signals import PEADModel, QuantModel
 from hedge_fund.signals.base import AlphaModel
@@ -127,6 +129,23 @@ class TestPEADPredict:
         sig = PEADModel().predict("TEST", "2025-08-01", fd)
         assert sig.value == 1.0
         assert sig.metadata["filing_date"] == "2025-08-01"
+
+    def test_decay_holds_the_view_and_fades_it(self):
+        fd = MockFDClient([_rec("2025-06-30", "2025-08-01", "BEAT")])
+        model = PEADModel(signal_window_days=45, decay=True)
+        assert model.predict("TEST", "2025-08-01", fd).value == 1.0
+        assert model.predict("TEST", "2025-08-10", fd).value == pytest.approx(0.8)
+        assert model.predict("TEST", "2025-09-16", fd).value == 0.0   # 46 days: outside the window
+
+    def test_decay_applies_to_misses(self):
+        fd = MockFDClient([_rec("2025-06-30", "2025-08-01", "MISS")])
+        sig = PEADModel(signal_window_days=45, decay=True).predict("TEST", "2025-08-10", fd)
+        assert sig.value == pytest.approx(-0.8)
+        assert sig.metadata["age_days"] == 9
+
+    def test_decay_requires_positive_window(self):
+        with pytest.raises(ValueError, match="signal_window_days"):
+            PEADModel(signal_window_days=0, decay=True)
 
     def test_returns_signal_type(self):
         fd = MockFDClient([_rec("2025-06-30", "2025-08-01", "BEAT")])
