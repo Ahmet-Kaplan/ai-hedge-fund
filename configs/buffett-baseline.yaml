@@ -12,11 +12,16 @@
 #   - cash:        exposure removed by the 15% cap is NOT redistributed — it
 #                  stays in cash (risk/limits.py).
 #
-# A mandate never names tickers. Point it at the baseline universe
-# (configs/baseline-universe.yaml) with --tickers:
+# A mandate never names tickers. Backtest it over a point-in-time universe —
+# the top 10 US common stocks by market cap as known on each annual
+# reconstitution date, delisted companies included (hedge_fund/universe):
 #
-#   aihf configs/buffett-baseline.yaml --backtest --start 2025-01-01 --date 2026-08-31 \
-#     --tickers AAPL,MSFT,GOOGL,AMZN,META,BRK.B,JPM,KO,PG,JNJ,WMT,XOM,CVX,V,MA
+#   python -m hedge_fund.universe --start 2016-07-01 --end 2025-07-01 --top-n 10 --out universe.json
+#   aihf configs/buffett-baseline.yaml --backtest --start 2016-07-01 --date 2026-06-30 \
+#     --universe-schedule universe.json
+#
+# or at a fixed, hand-picked list (survivorship-biased; see
+# configs/baseline-universe.yaml) with --tickers.
 #
 schema_version: 2
 name: buffett-baseline

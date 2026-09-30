@@ -134,6 +134,10 @@ CONCEPTS: dict[str, Concept] = {c.name: c for c in [
 
 # Cover-page share count, reported as of a date shortly before filing.
 COVER_SHARES_TAG = "EntityCommonStockSharesOutstanding"
+# Non-affiliate market value as of the registrant's last Q2 end (10-K cover).
+PUBLIC_FLOAT_TAG = "EntityPublicFloat"
+# Bumped when trim_companyfacts keeps more; older cached documents refetch.
+TRIM_VERSION = 2
 
 # Periodic reports whose facts we read. Amendments count as knowledge
 # (restated values become visible on their own filing date) but do not
@@ -153,13 +157,14 @@ def trim_companyfacts(raw: dict) -> dict:
     """Reduce an SEC companyfacts document to what the adapter reads.
 
     Keeps entity identity, the us-gaap tags in CONCEPTS, and dei cover-page
-    shares — each only for periodic-report forms — typically ~5% of the
+    shares and public float — each only for periodic-report forms — typically ~5% of the
     original size.
     """
     facts = raw.get("facts") or {}
     wanted = used_tags()
-    out: dict = {"cik": raw.get("cik"), "entityName": raw.get("entityName"), "facts": {"us-gaap": {}, "dei": {}}}
-    for ns, tags in (("us-gaap", wanted), ("dei", {COVER_SHARES_TAG})):
+    out: dict = {"cik": raw.get("cik"), "entityName": raw.get("entityName"), "trim_version": TRIM_VERSION,
+                 "facts": {"us-gaap": {}, "dei": {}}}
+    for ns, tags in (("us-gaap", wanted), ("dei", {COVER_SHARES_TAG, PUBLIC_FLOAT_TAG})):
         for tag, body in (facts.get(ns) or {}).items():
             if tag not in tags:
                 continue

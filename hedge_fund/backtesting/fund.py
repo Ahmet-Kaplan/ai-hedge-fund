@@ -14,6 +14,7 @@ from hedge_fund.data.protocol import DataClient
 from hedge_fund.data.sessions import previous_day, session_closes
 from hedge_fund.fund import Fund, normalize_universe
 from hedge_fund.pipeline.models import CycleRecord, DecisionRecord, PendingRunResult
+from hedge_fund.universe.models import UniverseSchedule
 from hedge_fund.pipeline.run_cycle import assess_fund, exact_marks, execute_decision
 
 
@@ -74,7 +75,8 @@ class FundBacktestResult(BaseModel):
     end: str                          # last valuation session
     rebalance: str
     benchmark: str
-    universe: list[str]               # the tickers this backtest was run over
+    universe: list[str]               # the tickers this backtest was run over (all dates)
+    universe_schedule: dict[str, list[str]] = Field(default_factory=dict)  # point-in-time: reconstitution date -> members
     capital: float
     dates: list[str]
     nav: list[float]                  # closing NAV for every observed session
@@ -86,7 +88,7 @@ class FundBacktestResult(BaseModel):
 
 
 def backtest_fund(
-    fund: Fund, start: str, end: str, data_client: DataClient, universe: list[str], *,
+    fund: Fund, start: str, end: str, data_client: DataClient, universe: list[str] | UniverseSchedule, *,
     on_cycle: Callable[[int, int, CycleRecord], None] | None = None,
     on_valuation: Callable[[int, int, DailyValuation], None] | None = None,
     delisting_policy: DelistingPolicy = DEFAULT_POLICY,
@@ -98,7 +100,8 @@ def backtest_fund(
     can remain pending without extending the requested window.
     """
     spec = fund.spec
-    universe = normalize_universe(universe)
+    pit = universe if isinstance(universe, UniverseSchedule) else None
+    universe = pit.all_tickers() if pit is not None else normalize_universe(universe)
     schedule = build_schedule(data_client, spec.benchmark, start, end, spec.rebalance)
     dates = list(schedule.closes)
     broker = SimBroker(cash=spec.capital)
@@ -131,8 +134,9 @@ def backtest_fund(
             on_valuation(i, len(dates), DailyValuation(
                 as_of=session, nav=nav[-1], benchmark_nav=benchmark_nav[-1],
             ))
-        if session in schedule.execution_dates:
-            proposal = assess_fund(fund, session, data_client, universe)
+        members = pit.members_on(session) if pit is not None else universe
+        if session in schedule.execution_dates and members:
+            proposal = assess_fund(fund, session, data_client, members)
             execution = schedule.execution_dates[session]
             if execution is None:
                 pending.append(PendingRunResult(
@@ -147,6 +151,7 @@ def backtest_fund(
         dates=dates, nav=nav, benchmark_nav=benchmark_nav,
         metrics=performance_metrics(spec.capital, dates, nav, benchmark_nav, records, len(pending), len(delistings)),
         records=records, pending=pending, delistings=delistings,
+        universe_schedule={snap.as_of: snap.tickers for snap in pit.snapshots} if pit is not None else {},
     )
 
 

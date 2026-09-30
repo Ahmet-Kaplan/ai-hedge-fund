@@ -44,6 +44,7 @@ from hedge_fund.pipeline import run_cycle
 from hedge_fund.pipeline.models import PendingRunResult
 from hedge_fund.tui.keys import apply_credentials
 from hedge_fund.tui.shared import _BACKTEST_WEEKS
+from hedge_fund.universe.builder import load_schedule
 
 
 def main() -> None:
@@ -87,6 +88,11 @@ def main() -> None:
         "(default: HEDGE_FUND_LLM_MODEL env, else the built-in default); quant models "
         "ignore it",
     )
+    parser.add_argument(
+        "--universe-schedule",
+        help="backtest over a point-in-time universe built by `python -m hedge_fund.universe` "
+        "(JSON); replaces --tickers",
+    )
     parser.add_argument("--out", help="also write the record JSON to this file")
     args = parser.parse_args()
 
@@ -101,9 +107,21 @@ def main() -> None:
         HedgeFundApp().run()
         return
 
-    if not args.tickers:
+    pit_schedule = None
+    if args.universe_schedule:
+        if not args.backtest:
+            parser.error("--universe-schedule applies to --backtest only")
+        if args.tickers:
+            parser.error("use either --tickers or --universe-schedule, not both")
+        try:
+            pit_schedule = load_schedule(args.universe_schedule)
+        except (OSError, ValueError) as exc:
+            parser.error(f"--universe-schedule: {exc}")
+        universe = pit_schedule.all_tickers()
+    elif not args.tickers:
         parser.error("--tickers is required with a mandate, e.g. --tickers AAPL,MSFT")
-    universe = normalize_universe(args.tickers.replace(",", " ").split())
+    else:
+        universe = normalize_universe(args.tickers.replace(",", " ").split())
 
     console = Console(stderr=True)  # status + summary on stderr; stdout stays pure JSON
     try:
@@ -126,7 +144,7 @@ def main() -> None:
                 f"over {', '.join(universe)}…",
                 spinner="dots",
             ):
-                result = backtest_fund(fund, start, args.date, fd, universe)
+                result = backtest_fund(fund, start, args.date, fd, pit_schedule or universe)
         print(result.model_dump_json(indent=2))
         if args.out:
             Path(args.out).write_text(result.model_dump_json(indent=2))

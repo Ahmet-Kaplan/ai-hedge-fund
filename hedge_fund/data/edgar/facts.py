@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from hedge_fund.data.edgar.concepts import CONCEPTS, COVER_SHARES_TAG, KNOWLEDGE_FORMS, PERIODIC_FORMS
+from hedge_fund.data.edgar.concepts import CONCEPTS, COVER_SHARES_TAG, KNOWLEDGE_FORMS, PERIODIC_FORMS, PUBLIC_FLOAT_TAG
 
 QUARTER_DAYS = (80, 100)
 ANNUAL_DAYS = (350, 380)
@@ -107,7 +107,7 @@ class FactStore:
         """
         by_accn: dict[str, list[Fact]] = {}
         for f in self.facts:
-            if f.form in PERIODIC_FORMS and f.tag != COVER_SHARES_TAG:
+            if f.form in PERIODIC_FORMS and f.tag not in (COVER_SHARES_TAG, PUBLIC_FLOAT_TAG):
                 by_accn.setdefault(f.accn, []).append(f)
         filings: dict[str, Filing] = {}
         for accn, facts in by_accn.items():
@@ -122,6 +122,10 @@ class FactStore:
             if current is None or (filing.filed, filing.accn) < (current.filed, current.accn):
                 filings[period] = filing
         return sorted(filings.values(), key=lambda x: (x.filed, x.accn))
+
+    def public_floats(self, cutoff: str) -> list[Fact]:
+        """Public-float facts filed on or before *cutoff*, oldest first."""
+        return [f for f in self.facts if f.tag == PUBLIC_FLOAT_TAG and f.unit == "USD" and f.filed <= cutoff]
 
     def cover_shares(self, accn: str) -> list[Fact]:
         return [f for f in self.facts if f.accn == accn and f.tag == COVER_SHARES_TAG]

@@ -167,6 +167,12 @@ class TiingoClient:
         return {r["date"]: r["divCash"] for r in self._rows(ticker)
                 if start_date <= r["date"] <= end_date and r["divCash"]}
 
+    def is_stored(self, ticker: str) -> bool:
+        """True if *ticker*'s history (or a remembered miss) is already on
+        disk or pinned in this process — reading it costs no request."""
+        symbol = tiingo_symbol(ticker)
+        return (str(self._dir.resolve()), symbol) in _HISTORIES or self._path(symbol).exists()
+
     def history_range(self, ticker: str) -> tuple[str, str] | None:
         rows = self._rows(ticker)
         return (rows[0]["date"], rows[-1]["date"]) if rows else None

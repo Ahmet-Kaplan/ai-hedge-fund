@@ -85,3 +85,77 @@ def test_cli_executes_all_modes_with_offline_clients(tmp_path, monkeypatch, caps
         assert (record["positions"].get("MSFT", 0) < 0) == (mode != "long_only")
         if mode == "dollar_neutral":
             assert sum(record["final_weights"].values()) == pytest.approx(0)
+
+
+def _schedule_file(tmp_path):
+    from hedge_fund.universe.models import UniverseConfig, UniverseMember, UniverseSchedule, UniverseSnapshot
+
+    def member(rank, ticker):
+        return UniverseMember(rank=rank, ticker=ticker, cik=rank, market_cap=1.0, price=1.0, price_date="2025-01-03",
+                              shares=1.0, shares_source="dei_cover", public_float=1.0, float_filed="2024-02-01",
+                              latest_filing="2024-11-01", symbol_source="current")
+
+    schedule = UniverseSchedule(config=UniverseConfig(top_n=1), snapshots=[
+        UniverseSnapshot(as_of="2025-01-03", config_digest="x", candidates=2, members=[member(1, "AAPL")]),
+        UniverseSnapshot(as_of="2025-01-10", config_digest="x", candidates=2, members=[member(1, "MSFT")]),
+    ])
+    path = tmp_path / "universe.json"
+    path.write_text(schedule.model_dump_json())
+    return path
+
+
+@pytest.mark.parametrize("extra, message", [
+    (["--tickers", "AAPL", "--backtest"], "either --tickers or --universe-schedule"),
+    ([], "applies to --backtest only"),
+])
+def test_cli_universe_schedule_argument_rules(tmp_path, monkeypatch, capsys, extra, message):
+    spec = FundSpec(schema_version=2, name="mixed", strategies=[custom_strategy(["buffett"])],
+                    risk={"max_position_pct": .25, "max_gross_exposure": 1})
+    path = tmp_path / "fund.yaml"
+    path.write_text(yaml.safe_dump(spec.model_dump()))
+    forbidden = Mock(side_effect=AssertionError("external activity"))
+    monkeypatch.setattr(run, "apply_credentials", lambda: None)
+    monkeypatch.setattr(run, "ensure_mandates_dir", lambda: tmp_path)
+    monkeypatch.setattr(run, "make_data_client", forbidden)
+    monkeypatch.setattr(sys, "argv", ["aihf", str(path), "--universe-schedule", str(_schedule_file(tmp_path)), *extra])
+    with pytest.raises(SystemExit) as exc:
+        run.main()
+    assert exc.value.code == 2 and message in capsys.readouterr().err
+    assert forbidden.call_count == 0
+
+
+def test_cli_backtests_over_a_point_in_time_schedule(tmp_path, monkeypatch, capsys):
+    import json
+
+    from hedge_fund.backtesting.test_fund import FakeAnalyst, FakeDataClient
+    from hedge_fund.fund import Fund
+    spec = FundSpec(schema_version=2, name="pit", strategies=[custom_strategy(["buffett"])],
+                    risk={"max_position_pct": 1.0, "max_gross_exposure": 1})
+    spec.strategies[0].blend.mode = "long_only"
+    path = tmp_path / "fund.yaml"
+    path.write_text(yaml.safe_dump(spec.model_dump()))
+    days = ["2025-01-03", "2025-01-06", "2025-01-10", "2025-01-13", "2025-01-17"]
+
+    class OfflineClient(FakeDataClient):
+        def __init__(self):
+            super().__init__({t: {d: 100 for d in days} for t in ("AAPL", "MSFT", "SPY")})
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(run, "apply_credentials", lambda: None)
+    monkeypatch.setattr(run, "ensure_mandates_dir", lambda: tmp_path)
+    monkeypatch.setattr(run, "Fund", lambda spec, blind: Fund(spec, models={"custom": [
+        FakeAnalyst("buffett", {"AAPL": 1.0, "MSFT": 1.0})]}))
+    monkeypatch.setattr(run, "make_data_client", OfflineClient)
+    monkeypatch.setattr(sys, "argv", ["aihf", str(path), "--backtest", "--start", "2025-01-03", "--date", "2025-01-17",
+                                      "--universe-schedule", str(_schedule_file(tmp_path))])
+    run.main()
+    result = json.loads(capsys.readouterr().out)
+    assert result["universe"] == ["AAPL", "MSFT"]
+    assert result["universe_schedule"] == {"2025-01-03": ["AAPL"], "2025-01-10": ["MSFT"]}
+    by_date = {r["as_of"]: r["universe"] for r in result["records"]}
+    assert by_date["2025-01-03"] == ["AAPL"] and by_date["2025-01-10"] == ["MSFT"]

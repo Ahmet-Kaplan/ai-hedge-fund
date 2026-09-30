@@ -46,3 +46,17 @@ def parse_cover_shares(document: str) -> dict[str | None, float]:
             key = letters[-1] if letters else label
         out[key] = out.get(key, 0.0) + float(number.group(1).replace(",", ""))
     return out
+
+
+_SYMBOL = re.compile(r"Trading Symbol\s+([A-Za-z][A-Za-z0-9.\-]{0,9})\b")
+
+
+def parse_trading_symbols(document: str) -> list[str]:
+    """Trading symbols on a rendered cover page (dei:TradingSymbol), in
+    order, upper-cased and de-duplicated. Empty if the filer tagged none."""
+    out: list[str] = []
+    for sym in _SYMBOL.findall(_text(document)):
+        sym = sym.upper().rstrip(".-")
+        if sym and sym not in out and sym not in ("NONE", "N"):
+            out.append(sym)
+    return out

@@ -35,8 +35,8 @@ from pathlib import Path
 
 import requests
 
-from hedge_fund.data.edgar.concepts import trim_companyfacts, trim_submissions
-from hedge_fund.data.edgar.cover import parse_cover_shares
+from hedge_fund.data.edgar.concepts import TRIM_VERSION, trim_companyfacts, trim_submissions
+from hedge_fund.data.edgar.cover import parse_cover_shares, parse_trading_symbols
 from hedge_fund.data.edgar.facts import Filing, FactStore
 from hedge_fund.data.edgar.identity import (
     SHARE_CLASSES,
@@ -256,13 +256,71 @@ class EdgarClient:
     # ------------------------------------------------------------------
 
     def resolve(self, ticker: str, as_of: str | None = None) -> Identity | None:
-        """Curated history first; SEC's current ticker map only on a miss."""
+        """Curated history first, then tickers read off SEC filings' cover
+        pages by the universe builder (register_tickers), then SEC's current
+        ticker map."""
         ident = self._history.resolve(ticker, as_of)
         if ident is not None:
             return ident
+        discovered = self._discovered().get(normalize_ticker(ticker))
+        if discovered is not None:
+            return Identity(ticker=normalize_ticker(ticker), cik=int(discovered), source="discovered")
         if self._current is None:
             self._current = TickerResolver(current=self._company_tickers(), history={})
         return self._current.resolve(ticker, as_of)
+
+    def register_tickers(self, mapping: dict[str, int]) -> None:
+        """Remember ticker -> CIK pairs read from SEC cover pages (e.g. a
+        delisted company's symbol), so fundamentals resolve for them later."""
+        path = self._dir / "discovered_tickers.json"
+        current = dict(self._discovered())
+        current.update({normalize_ticker(t): int(c) for t, c in mapping.items()})
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(dict(sorted(current.items())), indent=0))
+        self._discovered_map = current
+
+    def _discovered(self) -> dict[str, int]:
+        if getattr(self, "_discovered_map", None) is None:
+            path = self._dir / "discovered_tickers.json"
+            try:
+                self._discovered_map = {k: int(v) for k, v in json.loads(path.read_text()).items()}
+            except (OSError, ValueError):
+                self._discovered_map = {}
+        return self._discovered_map
+
+    def store_for_cik(self, cik: int) -> FactStore | None:
+        """All facts of one registrant (no lineage), or None if SEC has none."""
+        key = ((cik, None),)
+        if key not in self._stores:
+            doc = self._companyfacts(cik)
+            self._stores[key] = FactStore.from_companyfacts(doc) if doc is not None else None
+        return self._stores[key]
+
+    def company_profile(self, cik: int) -> dict | None:
+        """Trimmed SEC submissions profile: name, sic, entityType, tickers, ..."""
+        return self._submissions(cik)
+
+    def current_tickers(self) -> dict[str, int]:
+        """SEC's map of tickers trading today -> CIK."""
+        return self._company_tickers()
+
+    def frame(self, tag: str, unit: str, period: str, taxonomy: str = "dei") -> list[dict]:
+        """One fact per filer for a calendar period (SEC XBRL frames API),
+        e.g. frame("EntityPublicFloat", "USD", "CY2019Q2I"). Values are the
+        latest filed — use for discovery only, never as point-in-time data."""
+        rows = self._cached(f"frames/{taxonomy}/{tag}/{unit}/{period}.json.gz",
+                            lambda: self._get_json(f"{self.DATA_URL}/api/xbrl/frames/{taxonomy}/{tag}/{unit}/{period}.json"),
+                            trim=lambda raw: [{k: r.get(k) for k in ("cik", "entityName", "end", "val", "accn")}
+                                              for r in raw.get("data", [])])
+        return rows or []
+
+    def trading_symbols(self, cik: int, accn: str) -> list[str]:
+        """Trading symbols printed on a filing's cover page, in order."""
+        rel = f"symbols/{cik}/{accn}.json.gz"
+        if not (self._dir / rel).exists() and self._offline:
+            return []
+        url = f"{self.WWW_URL}/Archives/edgar/data/{cik}/{accn.replace('-', '')}/R1.htm"
+        return self._cached(rel, lambda: self._get_text(url), trim=parse_trading_symbols, immutable=True) or []
 
     # ------------------------------------------------------------------
     # Row construction
@@ -359,7 +417,8 @@ class EdgarClient:
     def _companyfacts(self, cik: int) -> dict | None:
         return self._cached(f"companyfacts/CIK{cik:010d}.json.gz",
                             lambda: self._get_json(f"{self.DATA_URL}/api/xbrl/companyfacts/CIK{cik:010d}.json"),
-                            trim=trim_companyfacts)
+                            trim=trim_companyfacts,
+                            current=lambda d: d is None or d.get("trim_version", 1) >= TRIM_VERSION)
 
     def _submissions(self, cik: int) -> dict | None:
         return self._cached(f"submissions/CIK{cik:010d}.json.gz",
@@ -379,13 +438,15 @@ class EdgarClient:
             return None
         return {(None if k == "" else k): v for k, v in data.items()}
 
-    def _cached(self, rel: str, fetch, trim, immutable: bool = False):
+    def _cached(self, rel: str, fetch, trim, immutable: bool = False, current=None):
         path = self._dir / rel
         with _doc_lock(path):
-            return self._cached_locked(path, rel, fetch, trim, immutable)
+            return self._cached_locked(path, rel, fetch, trim, immutable, current)
 
-    def _cached_locked(self, path: Path, rel: str, fetch, trim, immutable: bool):
+    def _cached_locked(self, path: Path, rel: str, fetch, trim, immutable: bool, current=None):
         hit = self._read(path)
+        if hit is not None and current is not None and not self._offline and not current(hit.get("data")):
+            hit = None  # cached in an older trimmed format
         if hit is not None:
             fresh = immutable or self._offline or self._max_age is None
             if not fresh:
