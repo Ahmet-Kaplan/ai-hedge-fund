@@ -174,10 +174,12 @@ class FreeDataClient:
         rows = self.get_financial_metrics(ticker, end_date, limit=1)
         return rows[0].market_cap if rows else None
 
-    def coverage(self, tickers: list[str], as_of: str, prices_only: set[str] = frozenset()) -> list[Coverage]:
+    def coverage(self, tickers: list[str], as_of: str, prices_only: set[str] = frozenset(),
+                 refresh: bool = False) -> list[Coverage]:
         """Sync every ticker and report what is available as of `as_of`.
 
         Tickers in `prices_only` (the benchmark ETF files no financials) skip SEC.
+        `refresh` re-downloads SEC data even if the stored copy is recent.
         """
         self.prefetch_prices(tickers, as_of)
         out = []
@@ -190,6 +192,9 @@ class FreeDataClient:
                 out.append(row)
                 continue
             try:
+                if refresh:
+                    self._sec.sync_company(ticker, self._store, now=self._now().isoformat())
+                    self._synced.add(ticker)
                 metrics = self.get_financial_metrics(ticker, as_of, limit=40)
                 row.periods = len(metrics)
                 row.latest_period = metrics[0].report_period if metrics else None

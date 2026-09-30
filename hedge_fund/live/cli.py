@@ -201,7 +201,7 @@ def _data_sync(args, spec: FundSpec, ledger: Ledger) -> int:
         if not isinstance(data, FreeDataClient):
             print("data-sync applies to the free data source (HEDGE_FUND_DATA=free)")
             return 2
-        rows = data.coverage(tickers, completed_through(), prices_only={spec.benchmark})
+        rows = data.coverage(tickers, completed_through(), prices_only={spec.benchmark}, refresh=True)
     print(f"{'ticker':7} {'prices':23} {'fundamental periods':>20} {'latest':>11} {'earnings':>9}")
     for r in rows:
         if r.error:

@@ -43,7 +43,7 @@ def test_data_sync_prints_coverage(monkeypatch, capsys, tmp_path):
         def __init__(self):
             pass
 
-        def coverage(self, tickers, as_of, prices_only=frozenset()):
+        def coverage(self, tickers, as_of, prices_only=frozenset(), refresh=False):
             return [Coverage("AAPL", "2016-01-04", "2026-09-29", 12, "2026-06-27", 8),
                     Coverage("XOM", "2016-01-04", "2026-09-29", 1, "2026-06-30", 0, warning="lagging"),
                     Coverage("SPY", "2016-01-04", "2026-09-29")]

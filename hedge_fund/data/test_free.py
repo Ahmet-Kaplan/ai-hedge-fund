@@ -182,3 +182,11 @@ def test_benchmark_coverage_is_prices_only(tmp_path):
     sec = FakeSec(fail=True)
     [row] = client(tmp_path, sec=sec).coverage(["SPY"], "2026-09-29", prices_only={"SPY"})
     assert row.error is None and row.price_last == "2026-08-03" and sec.calls == []
+
+
+def test_coverage_refresh_resyncs_recent_data(tmp_path):
+    sec = FakeSec()
+    c = client(tmp_path, sec=sec)
+    c.coverage(["TEST"], "2026-09-29")
+    c.coverage(["TEST"], "2026-09-29", refresh=True)
+    assert len(sec.calls) == 2
