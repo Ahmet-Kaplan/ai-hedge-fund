@@ -204,3 +204,26 @@ risk-adjusted results. All depend on this data layer.
 **Phase 4 — Insider purchases (optional)**
 - SEC Form 4 open-market purchases (transaction code P) by officers/directors,
   clustered over 90 days, as a long-only quant signal. Sales ignored.
+
+## 11. Phase 2 results (2026-09-30)
+
+Weekly, 2017-01-03 → 2026-09-29, the 32-name paper universe, 5 bps per side,
+50 bps annual borrow, max 10% per name; free data, no LLM.
+
+| Variant | Total | Annual | Sharpe | Max DD | Beta | Alpha/yr |
+|---|---|---|---|---|---|---|
+| Equal-weight | +618% | +22.4% | 1.25 | 31.6% | 0.95 | +7.0% |
+| Equal-weight, inverse-vol | +481% | +19.8% | 1.22 | 29.7% | — | — |
+| Momentum long-only + SPY | +506% | +20.3% | 1.21 | 28.9% | 0.83 | +6.8% |
+| SPY | +293% | +15.1% | 0.88 | 33.8% | 1.00 | 0 |
+| Momentum L/S, conviction | +213% | +12.4% | 0.85 | 28.0% | 0.59 | +3.6% |
+| Momentum L/S, inverse-vol | +200% | +11.9% | 0.89 | 26.2% | 0.56 | +3.4% |
+
+Verdict by the pre-committed rule: neither momentum nor inverse-vol sizing
+beats both yardsticks, so neither enters the paper mandate (both remain
+available, off by default). The universe is today's 32 largest companies, so
+equal-weight's +7%/yr "alpha" is survivorship bias; that bias also penalizes
+shorting. No strategy can be judged fairly on it. Next: a point-in-time
+universe (the ~100 largest US stocks as of each date, delisted names
+included), built from Alpaca bars + SEC, before re-testing Phase 2 or
+starting Phase 3.
