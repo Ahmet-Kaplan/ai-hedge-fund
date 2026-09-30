@@ -33,6 +33,7 @@ def blend_signals(
     *,
     mode: PortfolioMode,
     investment_approaches: Mapping[str, InvestmentApproach],
+    max_name_weight: float | None = None,
 ) -> BlendResult:
     """Blend voting opinions, respecting each analyst's permission to short.
 
@@ -45,12 +46,19 @@ def blend_signals(
     Eligible scores are normalized to gross_target. Dollar-neutral strategies
     allocate half to each side, or target zero when either side is missing.
     This relative sizing does not calibrate conviction into expected returns.
+
+    With max_name_weight, no name exceeds that fraction of the sleeve: excess
+    goes to the side's other names in proportion to their scores, and what
+    the cap cannot place stays in cash. A dollar-neutral sleeve then shrinks
+    its larger side to match the smaller, so it stays neutral.
     Invalid modes, profiles, weights, or signal values raise ValueError.
     """
     if mode not in ("long_only", "long_short", "dollar_neutral"):
         raise ValueError(f"unknown portfolio mode {mode!r}")
     if not isfinite(gross_target) or gross_target <= 0:
         raise ValueError("gross_target must be finite and positive")
+    if max_name_weight is not None and (not isfinite(max_name_weight) or max_name_weight <= 0):
+        raise ValueError("max_name_weight must be finite and positive")
     for name, weight in model_weights.items():
         if not isfinite(weight) or weight <= 0:
             raise ValueError(f"analyst {name!r}: blend weight must be finite and positive")
@@ -91,13 +99,48 @@ def blend_signals(
             flat_reason = "missing_long_side"
         elif shorts < WEIGHT_TOLERANCE:
             flat_reason = "missing_short_side"
-        else:
+        elif max_name_weight is None:
             weights = {t: score / (longs if score > 0 else shorts) * (gross_target / 2) for t, score in scores.items()}
+        else:
+            long_side = _capped_allocation({t: s for t, s in scores.items() if s > 0}, gross_target / 2, max_name_weight)
+            short_side = _capped_allocation({t: -s for t, s in scores.items() if s < 0}, gross_target / 2, max_name_weight)
+            placed = min(sum(long_side.values()), sum(short_side.values()))
+            long_scale = placed / sum(long_side.values())
+            short_scale = placed / sum(short_side.values())
+            weights = dict.fromkeys(tickers, 0.0)
+            weights.update({t: w * long_scale for t, w in long_side.items()})
+            weights.update({t: -w * short_scale for t, w in short_side.items()})
     else:
         gross = sum(abs(score) for score in scores.values())
         if gross < WEIGHT_TOLERANCE:
             flat_reason = "no_eligible_positions"
-        else:
+        elif max_name_weight is None:
             weights = {t: score / gross * gross_target for t, score in scores.items()}
+        else:
+            placed = _capped_allocation({t: abs(s) for t, s in scores.items() if s != 0}, gross_target, max_name_weight)
+            weights = {t: placed.get(t, 0.0) * (1 if score > 0 else -1) for t, score in scores.items()}
 
     return BlendResult(convictions=convictions, eligible_scores=scores, weights=weights, flat_reason=flat_reason)
+
+
+def _capped_allocation(scores: dict[str, float], budget: float, cap: float) -> dict[str, float]:
+    """Split `budget` across positive `scores` proportionally, no name above `cap`.
+
+    Water-filling: names whose share exceeds the cap are pinned at it and the
+    rest re-split what remains. Budget the caps cannot place is left unallocated.
+    """
+    allocation: dict[str, float] = {}
+    remaining = dict(scores)
+    left = budget
+    while remaining:
+        total = sum(remaining.values())
+        shares = {t: left * s / total for t, s in remaining.items()}
+        over = [t for t, share in shares.items() if share > cap]
+        if not over:
+            allocation.update(shares)
+            break
+        for t in over:
+            allocation[t] = cap
+            left -= cap
+            del remaining[t]
+    return allocation

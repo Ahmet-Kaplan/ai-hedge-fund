@@ -160,3 +160,40 @@ def test_unknown_mode_or_missing_profile_is_rejected():
 def test_signal_accumulation_overflow_is_rejected():
     with pytest.raises(ValueError, match="totals must be finite"):
         blend_signals([_sig("a", "A", 1), _sig("b", "A", 1)], {"a": 1e308, "b": 1e308}, 1)
+
+
+# ---------------------------------------------------------------------------
+# max_name_weight — cap each name within the sleeve
+# ---------------------------------------------------------------------------
+
+def _capped(signals, cap, mode="long_short"):
+    return _blend_signals(signals, {"a": 1.0}, 1.0, mode=mode,
+                          investment_approaches={"a": "long_short"}, max_name_weight=cap)
+
+
+def test_cap_redistributes_excess_to_other_names():
+    signals = [_sig("a", "A", 0.9), _sig("a", "B", 0.05), _sig("a", "C", 0.05)]
+    weights = _capped(signals, cap=0.5).weights
+    assert weights["A"] == pytest.approx(0.5)
+    assert weights["B"] == pytest.approx(0.25) and weights["C"] == pytest.approx(0.25)
+
+
+def test_cap_leaves_what_it_cannot_place_in_cash():
+    signals = [_sig("a", "A", 0.9), _sig("a", "B", 0.1)]
+    weights = _capped(signals, cap=0.3).weights
+    assert weights == {"A": pytest.approx(0.3), "B": pytest.approx(0.3)}
+
+
+def test_cap_keeps_dollar_neutral_sides_equal():
+    # Four longs, one short: the short side can place only 0.2, so longs shrink to match.
+    signals = [_sig("a", t, 0.5) for t in "ABCD"] + [_sig("a", "S", -0.5)]
+    result = _capped(signals, cap=0.2, mode="dollar_neutral")
+    assert result.weights["S"] == pytest.approx(-0.2)
+    assert sum(w for w in result.weights.values() if w > 0) == pytest.approx(0.2)
+    assert sum(result.weights.values()) == pytest.approx(0.0)
+    assert all(abs(w) <= 0.2 + 1e-12 for w in result.weights.values())
+
+
+def test_no_cap_is_unchanged():
+    signals = [_sig("a", "A", 0.9), _sig("a", "B", 0.1)]
+    assert _capped(signals, cap=None).weights == blend_signals(signals, {"a": 1.0}, 1.0).weights

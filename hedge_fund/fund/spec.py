@@ -38,6 +38,7 @@ class BlendPolicy(BaseModel):
 
     method: Literal["conviction_weighted"] = "conviction_weighted"
     gross_target: float = Field(default=1.0, gt=0, description="desired sum of |weights| when views exist")
+    max_name_weight: float | None = Field(default=None, gt=0, description="cap on any one name, as a fraction of the sleeve; excess is spread to other names or left in cash")
     mode: PortfolioMode
 
 

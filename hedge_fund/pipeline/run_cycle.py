@@ -57,6 +57,7 @@ def assess_fund(
             signals, strategy.model_weights, strategy.blend.gross_target,
             mode=strategy.blend.mode,
             investment_approaches={m.name: get_investment_approach(m.name) for m in strategy.models},
+            max_name_weight=strategy.blend.max_name_weight,
         )
         slice_ = strategy.weight / total_slice
         for ticker, weight in blend.weights.items():
