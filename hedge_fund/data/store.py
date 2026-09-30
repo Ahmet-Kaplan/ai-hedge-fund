@@ -1,0 +1,168 @@
+"""Local market database — prices, SEC facts and filings, and finished runs.
+
+One SQLite file (~/.hedge-fund/market.db). Everything fetched from a free
+source lands here once and is read from here after, so a run never pays for
+or waits on data it already has. No network code lives here; the sources in
+alpaca_prices.py and sec.py fill it, and FreeDataClient reads it.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+from hedge_fund.data.models import Price
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS prices (
+    ticker TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER,
+    PRIMARY KEY (ticker, date));
+CREATE TABLE IF NOT EXISTS price_sync (ticker TEXT PRIMARY KEY, first_date TEXT, synced_through TEXT);
+CREATE TABLE IF NOT EXISTS sec_companies (
+    ticker TEXT PRIMARY KEY, cik TEXT, name TEXT, sic INTEGER, sic_description TEXT);
+CREATE TABLE IF NOT EXISTS sec_facts (
+    cik TEXT, concept TEXT, unit TEXT, start TEXT, end TEXT, value REAL,
+    fy INTEGER, fp TEXT, form TEXT, filed TEXT, accn TEXT,
+    PRIMARY KEY (cik, concept, unit, start, end, accn));
+CREATE INDEX IF NOT EXISTS sec_facts_lookup ON sec_facts (cik, concept, filed);
+CREATE TABLE IF NOT EXISTS sec_filings (
+    cik TEXT, accn TEXT PRIMARY KEY, form TEXT, filed TEXT, report_date TEXT, items TEXT);
+CREATE INDEX IF NOT EXISTS sec_filings_cik ON sec_filings (cik, form);
+CREATE TABLE IF NOT EXISTS sec_sync (cik TEXT PRIMARY KEY, facts_fetched_at TEXT, submissions_fetched_at TEXT);
+CREATE TABLE IF NOT EXISTS backtest_runs (
+    run_key TEXT PRIMARY KEY, label TEXT, status TEXT, started_at TEXT, finished_at TEXT,
+    result_json TEXT, error TEXT);
+"""
+
+
+@dataclass(frozen=True)
+class Fact:
+    """One XBRL fact from an SEC filing. `start` is None for balance-sheet (instant) facts."""
+
+    concept: str
+    unit: str
+    start: str | None
+    end: str
+    value: float
+    fy: int | None
+    fp: str | None
+    form: str
+    filed: str
+    accn: str
+
+
+class MarketStore:
+    def __init__(self, path: Path | str) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._db = sqlite3.connect(self.path)
+        self._db.row_factory = sqlite3.Row
+        self._db.execute("PRAGMA journal_mode=WAL")
+        self._db.executescript(_SCHEMA)
+
+    def close(self) -> None:
+        self._db.close()
+
+    # -- prices ----------------------------------------------------------------
+
+    def upsert_prices(self, ticker: str, bars: list[Price]) -> None:
+        with self._db:
+            self._db.executemany(
+                "INSERT OR REPLACE INTO prices VALUES (?,?,?,?,?,?,?)",
+                [(ticker, b.time[:10], b.open, b.high, b.low, b.close, b.volume) for b in bars],
+            )
+
+    def prices(self, ticker: str, start: str, end: str) -> list[Price]:
+        rows = self._db.execute(
+            "SELECT * FROM prices WHERE ticker=? AND date BETWEEN ? AND ? ORDER BY date",
+            (ticker, start, end),
+        ).fetchall()
+        return [Price(open=r["open"], high=r["high"], low=r["low"], close=r["close"],
+                      volume=r["volume"], time=f"{r['date']}T00:00:00Z") for r in rows]
+
+    def price_range(self, ticker: str) -> tuple[str, str] | None:
+        row = self._db.execute("SELECT first_date, synced_through FROM price_sync WHERE ticker=?", (ticker,)).fetchone()
+        return (row[0], row[1]) if row else None
+
+    def set_price_range(self, ticker: str, first: str, through: str) -> None:
+        with self._db:
+            self._db.execute("INSERT OR REPLACE INTO price_sync VALUES (?,?,?)", (ticker, first, through))
+
+    # -- SEC -------------------------------------------------------------------
+
+    def upsert_company(self, ticker: str, cik: str, name: str | None, sic: int | None, sic_description: str | None) -> None:
+        with self._db:
+            self._db.execute("INSERT OR REPLACE INTO sec_companies VALUES (?,?,?,?,?)",
+                             (ticker, cik, name, sic, sic_description))
+
+    def company(self, ticker: str) -> dict | None:
+        row = self._db.execute("SELECT * FROM sec_companies WHERE ticker=?", (ticker,)).fetchone()
+        return dict(row) if row else None
+
+    def replace_facts(self, cik: str, facts: list[Fact]) -> None:
+        with self._db:
+            self._db.execute("DELETE FROM sec_facts WHERE cik=?", (cik,))
+            self._db.executemany(
+                "INSERT OR REPLACE INTO sec_facts VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                [(cik, f.concept, f.unit, f.start or "", f.end, f.value, f.fy, f.fp, f.form, f.filed, f.accn)
+                 for f in facts],
+            )
+
+    def facts(self, cik: str, concepts: list[str], filed_lte: str) -> dict[str, list[Fact]]:
+        """Facts per concept that were public by `filed_lte`, oldest filing first."""
+        out: dict[str, list[Fact]] = {c: [] for c in concepts}
+        marks = ",".join("?" * len(concepts))
+        rows = self._db.execute(
+            f"SELECT * FROM sec_facts WHERE cik=? AND concept IN ({marks}) AND filed <= ? ORDER BY filed, end",
+            (cik, *concepts, filed_lte),
+        ).fetchall()
+        for r in rows:
+            out[r["concept"]].append(Fact(
+                concept=r["concept"], unit=r["unit"], start=r["start"] or None, end=r["end"],
+                value=r["value"], fy=r["fy"], fp=r["fp"], form=r["form"], filed=r["filed"], accn=r["accn"],
+            ))
+        return out
+
+    def replace_filings(self, cik: str, filings: list[dict]) -> None:
+        with self._db:
+            self._db.execute("DELETE FROM sec_filings WHERE cik=?", (cik,))
+            self._db.executemany(
+                "INSERT OR REPLACE INTO sec_filings VALUES (?,?,?,?,?,?)",
+                [(cik, f["accn"], f["form"], f["filed"], f.get("report_date"), f.get("items", "")) for f in filings],
+            )
+
+    def filings(self, cik: str, forms: list[str]) -> list[dict]:
+        marks = ",".join("?" * len(forms))
+        rows = self._db.execute(
+            f"SELECT accn, form, filed, report_date, items FROM sec_filings WHERE cik=? AND form IN ({marks}) ORDER BY filed",
+            (cik, *forms),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def sync_times(self, cik: str) -> tuple[str | None, str | None]:
+        row = self._db.execute("SELECT facts_fetched_at, submissions_fetched_at FROM sec_sync WHERE cik=?", (cik,)).fetchone()
+        return (row[0], row[1]) if row else (None, None)
+
+    def mark_synced(self, cik: str, *, facts_at: str | None = None, submissions_at: str | None = None) -> None:
+        current_facts, current_subs = self.sync_times(cik)
+        with self._db:
+            self._db.execute("INSERT OR REPLACE INTO sec_sync VALUES (?,?,?)",
+                             (cik, facts_at or current_facts, submissions_at or current_subs))
+
+    # -- finished runs ---------------------------------------------------------
+
+    def get_run(self, run_key: str) -> dict | None:
+        row = self._db.execute("SELECT * FROM backtest_runs WHERE run_key=?", (run_key,)).fetchone()
+        return dict(row) if row else None
+
+    def put_run(self, run_key: str, label: str, status: str, result_json: str | None, *, error: str | None = None) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        existing = self.get_run(run_key)
+        with self._db:
+            self._db.execute(
+                "INSERT OR REPLACE INTO backtest_runs VALUES (?,?,?,?,?,?,?)",
+                (run_key, label, status, existing["started_at"] if existing else now,
+                 now if status in ("done", "failed") else None, result_json, error),
+            )
