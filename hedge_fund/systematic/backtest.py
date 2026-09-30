@@ -97,13 +97,14 @@ class BacktestResult:
 class SystematicBacktester:
     def __init__(self, panel, strategies: list, config: BacktestConfig, *,
                  evidence: dict[str, StrategyEvidence] | None = None, regime=None,
-                 instruments: InstrumentRegistry | None = None, kill_switch_on: str | None = None) -> None:
+                 instruments: InstrumentRegistry | None = None, kill_switch_on: str | None = None,
+                 order_filter=None) -> None:
         self.panel, self.strategies, self.config = panel, strategies, config
         self.evidence, self.regime = evidence, regime
         self.instruments = instruments or InstrumentRegistry()
         self.execution = SimulatedExecution(panel, config.costs, config.timing, self.instruments)
         self.decider = DecisionEngine(strategies, config, evidence=evidence, regime=regime,
-                                      instruments=self.instruments)
+                                      instruments=self.instruments, order_filter=order_filter)
         self.kill_switch_on = kill_switch_on        # test/drill hook: engage the kill switch from this session
 
     # ------------------------------------------------------------------

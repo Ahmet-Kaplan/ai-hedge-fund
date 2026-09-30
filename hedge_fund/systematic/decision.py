@@ -36,7 +36,7 @@ def marks_for(view, symbols) -> dict[str, float]:
 
 class DecisionEngine:
     def __init__(self, strategies: list, config, *, evidence: dict[str, StrategyEvidence] | None = None,
-                 regime=None, instruments: InstrumentRegistry | None = None) -> None:
+                 regime=None, instruments: InstrumentRegistry | None = None, order_filter=None) -> None:
         if not strategies:
             raise ValueError("at least one strategy is required")
         if len(strategies) > 1 and evidence is None:
@@ -45,6 +45,7 @@ class DecisionEngine:
         self.instruments = instruments or InstrumentRegistry()
         self.risk = RiskEngine(config.risk)
         self.ensemble = Ensemble(config.ensemble)
+        self.order_filter = order_filter          # e.g. small_account.EconomicsFilter
 
     def _scores(self, view, signals: dict[str, list], regime_state):
         if self.evidence is None:                        # single strategy, no ensemble
@@ -86,7 +87,12 @@ class DecisionEngine:
             orders.append(OrderRequest(symbol=sym, side="buy" if delta > 0 else "sell", quantity=abs(delta),
                                        decision_session=view.session, reference_price=price,
                                        strategy="+".join(sorted(versions)), reason=reason).with_client_id())
-        record = {"session": view.session, "equity": eq, "regime": regime_state.model_dump() if regime_state else None,
+        filtered: list[str] = []
+        if self.order_filter is not None:
+            kept = self.order_filter(orders)
+            filtered = sorted({o.client_order_id for o in orders} - {o.client_order_id for o in kept})
+            orders = kept
+        record = {"filtered_orders": filtered, "session": view.session, "equity": eq, "regime": regime_state.model_dump() if regime_state else None,
                   "strategy_weights": strategy_weights,
                   "signals": {n: [{"ticker": s.ticker, "value": s.value, "abstained": bool(s.metadata.get("abstained"))}
                                   for s in sigs] for n, sigs in signals.items()},
