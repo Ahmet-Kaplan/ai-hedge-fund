@@ -21,6 +21,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from hedge_fund.backtesting.delisting import DelistingEvent
 from hedge_fund.backtesting.fund import FundBacktestMetrics, FundBacktestResult
 from hedge_fund.models import Signal
 from hedge_fund.pipeline.models import CycleRecord, DecisionRecord, PendingRunResult
@@ -121,6 +122,7 @@ class BacktestReport(BaseModel):
     nav: list[float]
     benchmark_nav: list[float]
     rebalances: list[RebalanceSummary]
+    delistings: list[DelistingEvent] = Field(default_factory=list)
     latest: DecisionReport | None = None    # full detail for the last executed rebalance
     next_proposal: DecisionReport | None = None
 
@@ -188,7 +190,7 @@ def backtest_report(result: FundBacktestResult) -> BacktestReport:
     return BacktestReport(
         fund=result.fund, start=result.start, end=result.end, rebalance=result.rebalance, benchmark=result.benchmark,
         universe=result.universe, capital=result.capital, metrics=result.metrics, dates=result.dates, nav=result.nav,
-        benchmark_nav=result.benchmark_nav, rebalances=rebalances,
+        benchmark_nav=result.benchmark_nav, rebalances=rebalances, delistings=result.delistings,
         latest=cycle_report(result.records[-1]) if result.records else None,
         next_proposal=pending_report(result.pending[-1]) if result.pending else None,
     )

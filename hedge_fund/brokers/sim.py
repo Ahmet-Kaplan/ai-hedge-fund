@@ -58,3 +58,17 @@ class SimBroker:
             quantity=order.quantity,
             price=order.price,
         )
+
+    def convert_position(self, old: str, new: str) -> int:
+        """Re-register a holding under its successor symbol, share for share.
+
+        For a ticker change of the same security (e.g. a delisted stock that
+        continues trading OTC under a new symbol). No cash moves. Returns the
+        signed shares converted.
+        """
+        shares = self._shares.pop(old, 0)
+        if shares:
+            self._shares[new] = self._shares.get(new, 0) + shares
+            if self._shares[new] == 0:
+                del self._shares[new]
+        return shares

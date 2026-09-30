@@ -97,3 +97,4 @@ class CycleRecord(BaseModel):
     refreshed_assessment: DecisionRecord | None = None
     execution_as_of: str | None = None
     execution_policy: Literal["next_close"] | None = None
+    frozen: dict[str, str] = Field(default_factory=dict)  # held, not trading: ticker -> date of the close used

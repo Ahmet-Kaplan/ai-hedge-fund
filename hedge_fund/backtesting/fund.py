@@ -8,6 +8,7 @@ from typing import Callable, Literal
 import numpy as np
 from pydantic import BaseModel, Field
 
+from hedge_fund.backtesting.delisting import DEFAULT_POLICY, DelistingEvent, DelistingPolicy, resolve_delistings
 from hedge_fund.brokers.sim import SimBroker
 from hedge_fund.data.protocol import DataClient
 from hedge_fund.data.sessions import previous_day, session_closes
@@ -59,6 +60,7 @@ class FundBacktestMetrics(BaseModel):
     n_cycles: int
     n_orders: int
     n_pending: int = 0
+    n_delistings: int = 0
 
 
 class FundBacktestResult(BaseModel):
@@ -80,12 +82,14 @@ class FundBacktestResult(BaseModel):
     metrics: FundBacktestMetrics
     records: list[CycleRecord]
     pending: list[PendingRunResult] = Field(default_factory=list)
+    delistings: list[DelistingEvent] = Field(default_factory=list)  # held names that stopped trading
 
 
 def backtest_fund(
     fund: Fund, start: str, end: str, data_client: DataClient, universe: list[str], *,
     on_cycle: Callable[[int, int, CycleRecord], None] | None = None,
     on_valuation: Callable[[int, int, DailyValuation], None] | None = None,
+    delisting_policy: DelistingPolicy = DEFAULT_POLICY,
 ) -> FundBacktestResult:
     """Replay daily marks, executing assessments only on later observed sessions.
 
@@ -104,14 +108,23 @@ def backtest_fund(
     nav: list[float] = []
     benchmark_nav: list[float] = []
     n_cycles = sum(day is not None for day in schedule.execution_dates.values())
+    delistings: list[DelistingEvent] = []
+    last_fills: dict[str, float] = {}
     for i, session in enumerate(dates):
+        # Held names that stopped trading are converted, frozen, or closed out
+        # before anything else touches the book (backtesting/delisting.py).
+        resolution = resolve_delistings(broker, session, dates[:i + 1], data_client, last_fills, delisting_policy)
+        delistings.extend(resolution.events)
         if session in due:
-            record = execute_decision(fund, due.pop(session), session, broker, data_client)
+            record = execute_decision(fund, due.pop(session), session, broker, data_client,
+                                      frozen=resolution.frozen)
             records.append(record)
+            last_fills.update({f.ticker: f.price for f in record.fills})
             if on_cycle is not None:
                 on_cycle(len(records) - 1, n_cycles, record)
         held = broker.positions()
-        marks = exact_marks(list(held), session, data_client)
+        marks = exact_marks([t for t in held if t not in resolution.frozen], session, data_client)
+        marks.update({t: resolution.frozen[t][0] for t in held if t in resolution.frozen})
         nav.append(broker.cash() + sum(p.shares * marks[t] for t, p in held.items()))
         benchmark_nav.append(spec.capital * schedule.closes[session] / schedule.closes[dates[0]])
         if on_valuation is not None:
@@ -132,8 +145,8 @@ def backtest_fund(
         fund=spec.name, start=dates[0], end=dates[-1], rebalance=spec.rebalance,
         benchmark=spec.benchmark, universe=universe, capital=spec.capital,
         dates=dates, nav=nav, benchmark_nav=benchmark_nav,
-        metrics=performance_metrics(spec.capital, dates, nav, benchmark_nav, records, len(pending)),
-        records=records, pending=pending,
+        metrics=performance_metrics(spec.capital, dates, nav, benchmark_nav, records, len(pending), len(delistings)),
+        records=records, pending=pending, delistings=delistings,
     )
 
 
@@ -167,6 +180,7 @@ def performance_metrics(
     benchmark_nav: list[float],
     records: list[CycleRecord],
     n_pending: int = 0,
+    n_delistings: int = 0,
 ) -> FundBacktestMetrics:
     """Closing-value performance over the full window, with daily-return Sharpe."""
     total = nav[-1] / capital - 1
@@ -203,4 +217,5 @@ def performance_metrics(
         n_cycles=len(records),
         n_pending=n_pending,
         n_orders=sum(len(r.orders) for r in records),
+        n_delistings=n_delistings,
     )

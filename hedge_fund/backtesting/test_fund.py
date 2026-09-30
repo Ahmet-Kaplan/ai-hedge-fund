@@ -237,11 +237,17 @@ def test_single_session_window_is_cash_with_pending_proposal():
     assert result.metrics.sharpe_ratio == 0
 
 
-def test_missing_daily_mark_for_held_ticker_stops_replay():
+def test_missing_daily_mark_for_held_ticker_is_carried_within_grace():
+    # A one-session gap in a held name (e.g. a halt) no longer stops the
+    # replay: the position is valued at its last real close (2024-06-11,
+    # 200) for that session only, nothing is liquidated, and the book
+    # resumes normal marks the next day (backtesting/delisting.py).
     series = {ticker: dict(values) for ticker, values in SERIES.items()}
     del series["AAPL"]["2024-06-12"]
-    with pytest.raises(ValueError, match="AAPL.*2024-06-12"):
-        _run(series)
+    result = _run(series)
+    assert result.nav == _run().nav
+    assert result.delistings == [] and result.metrics.n_delistings == 0
+    assert result.records[-1].positions == {"AAPL": 500}
 
 
 def test_daily_sharpe_uses_consecutive_returns_without_initial_zero():

@@ -137,6 +137,11 @@ def main() -> None:
             f"vs {spec.benchmark} {m.benchmark_return_pct:+.1%}  ·  "
             f"sharpe {m.sharpe_ratio:.2f}  ·  max drawdown {m.max_drawdown_pct:.1%}"
         )
+        for e in result.delistings:
+            detail = (f"liquidated {e.shares:,} sh at ${e.price:,.4f} ({e.price_date}) → ${e.proceeds:,.2f}"
+                      if e.action == "liquidated" else f"continues as {e.successor} at ${e.price:,.4f}, no cash")
+            console.print(f"[yellow]DELISTING[/] {e.ticker} · delisted {e.delisting_date} · {detail} · "
+                          f"{e.event_type or 'unexplained gap'} · policy {e.policy}")
         return
 
     broker = SimBroker(cash=spec.capital)

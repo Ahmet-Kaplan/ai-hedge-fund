@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 
 from hedge_fund.data.edgar import USER_AGENT_ENV, EdgarClient
+from hedge_fund.data.security_events import security_event
 from hedge_fund.data.tiingo import API_KEY_ENV as TIINGO_KEY_ENV
 from hedge_fund.data.tiingo import TiingoClient
 
@@ -98,6 +99,10 @@ class CompositeDataClient:
 
     def dividends(self, ticker, start_date, end_date):
         return self.prices.dividends(ticker, start_date, end_date)
+
+    def security_event(self, ticker):
+        """Curated listing-ending event (take-private, failure, ...) or None."""
+        return security_event(ticker)
 
     # fundamentals -------------------------------------------------------
 

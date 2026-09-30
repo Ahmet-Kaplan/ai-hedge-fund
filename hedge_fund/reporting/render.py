@@ -81,6 +81,13 @@ def _backtest_md(b: BacktestReport) -> str:
     for s in b.rebalances:
         holdings = ", ".join(f"{h.ticker} {h.weight:.1%}" for h in s.holdings) or "—"
         lines.append(f"| {s.as_of} | {s.executed or '—'} | ${s.nav:,.2f} | {s.cash_weight:.1%} | {holdings} | {', '.join(s.buys) or '—'} | {', '.join(s.sells) or '—'} |")
+    if b.delistings:
+        lines += ["", "## Delistings", "",
+                  "| Ticker | Delisting date | Processed | Action | Shares | Final price | Price date | Proceeds | Event | Policy |",
+                  "|---|---|---|---|---:|---:|---|---:|---|---|"]
+        for e in b.delistings:
+            lines.append(f"| {e.ticker} | {e.delisting_date} | {e.session} | {_delisting_action(e)} | {e.shares:,} | "
+                         f"${e.price:,.4f} | {e.price_date} | ${e.proceeds:,.2f} | {e.event_type or 'unexplained'} | {_md(_policy_text(e))} |")
     if b.latest:
         lines += ["", *_decision_md(b.latest, heading="##")]
     if b.next_proposal:
@@ -184,6 +191,15 @@ def _backtest_html(b: BacktestReport) -> str:
         f"<td class=BUY>{escape(', '.join(s.buys) or '—')}</td><td class=SELL>{escape(', '.join(s.sells) or '—')}</td></tr>" for s in b.rebalances)
     out.append('<h2>Rebalance history</h2><div class="card scroll"><table><thead><tr><th>Decided</th><th>Executed</th><th class=num>NAV</th>'
                f"<th class=num>Cash</th><th>Holdings</th><th>Bought</th><th>Sold</th></tr></thead><tbody>{rows}</tbody></table></div>")
+    if b.delistings:
+        drows = "".join(
+            f"<tr><td><b>{escape(e.ticker)}</b></td><td>{escape(e.delisting_date)}</td><td>{escape(e.session)}</td>"
+            f"<td>{escape(_delisting_action(e))}</td><td class=num>{e.shares:,}</td><td class=num>${e.price:,.4f}</td>"
+            f"<td>{escape(e.price_date)}</td><td class=num>${e.proceeds:,.2f}</td><td>{escape(e.event_type or 'unexplained')}</td>"
+            f"<td class=why>{escape(_policy_text(e))}</td></tr>" for e in b.delistings)
+        out.append('<h2>Delistings</h2><div class="card scroll"><table><thead><tr><th>Ticker</th><th>Delisting date</th><th>Processed</th>'
+                   '<th>Action</th><th class=num>Shares</th><th class=num>Final price</th><th>Price date</th><th class=num>Proceeds</th>'
+                   f"<th>Event</th><th>Policy</th></tr></thead><tbody>{drows}</tbody></table></div>")
     if b.latest:
         out.append(_decision_html(b.latest, top=False))
     if b.next_proposal:
@@ -264,6 +280,29 @@ def _signals(d: TickerDecision) -> str:
 
 def _confidences(d: TickerDecision) -> str:
     return ", ".join(f"{v.confidence:.0f}" for v in d.views if v.confidence is not None) or "—"
+
+
+_POLICY_TEXT = {
+    "successor_symbol": "same shares continue under the successor symbol; converted 1:1, no cash",
+    "successor_prices_under_original_symbol": "listing ended; the price feed continues with the successor's trading under this symbol, so the position is kept at those prices, no cash",
+    "known_delisting_last_close": "listing ended (known event); liquidated at the last close on or before the last trading day",
+    "successor_not_trading_last_close": "successor did not start trading within the wait window; liquidated at the last listed close",
+    "no_close_within_grace_last_close": "no close within the grace window; liquidated at the last valid close",
+    "last_fill_price": "no close in the lookback window; liquidated at the backtest's last fill price",
+}
+
+
+def _delisting_action(e) -> str:
+    if e.action == "converted_to_successor":
+        return f"DELISTING: converted to {e.successor}"
+    if e.action == "continued_as_successor":
+        return f"DELISTING: continues as {e.successor}"
+    return "DELISTING: liquidated"
+
+
+def _policy_text(e) -> str:
+    text = _POLICY_TEXT.get(e.policy, e.policy)
+    return f"{text}. {e.note}" if e.note else text
 
 
 def _money(v: float | None) -> str:

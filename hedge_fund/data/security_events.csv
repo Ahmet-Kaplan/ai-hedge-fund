@@ -1,0 +1,5 @@
+ticker,last_trading_day,event_type,successor,note
+TWTR,2022-10-27,take_private,,Twitter Inc. taken private by X Holdings; NYSE suspended trading 2022-10-28
+ATVI,2023-10-12,acquisition,,Activision Blizzard acquired by Microsoft; Nasdaq suspended trading 2023-10-13
+SIVB,2023-03-09,bank_failure,SIVBQ,SVB Financial Group; Silicon Valley Bank seized 2023-03-10; shares later traded OTC as SIVBQ
+FRC,2023-04-28,bank_failure,FRCB,First Republic Bank seized 2023-05-01; shares traded OTC as FRCB

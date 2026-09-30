@@ -10,6 +10,7 @@ from hedge_fund.brokers.models import Fill
 from hedge_fund.brokers.protocol import Broker
 from hedge_fund.data.protocol import DataClient
 from hedge_fund.data.sessions import completed_through, previous_day, session_closes
+from hedge_fund.data.tradability import tradable_closes
 from hedge_fund.fund import Fund, normalize_universe
 from hedge_fund.models import Signal
 from hedge_fund.pipeline.execution import build_orders
@@ -28,6 +29,8 @@ from hedge_fund.signals import get_investment_approach
 # How far back to look for the most recent close: covers weekends, holiday
 # clusters, and short trading halts without reaching into stale history.
 _MARK_LOOKBACK_DAYS = 7
+# Window for recognizing a vendor's carry-forward of a delisted listing's last close.
+_TRADABILITY_LOOKBACK_DAYS = 45
 
 
 def assess_fund(
@@ -113,8 +116,15 @@ def exact_marks(tickers: list[str], session: str, data_client: DataClient) -> di
 def execute_decision(
     fund: Fund, original: DecisionRecord, session: str,
     broker: Broker, data_client: DataClient,
+    frozen: dict[str, tuple[float, str]] | None = None,
 ) -> CycleRecord:
-    """Refresh views before sizing a complete rebalance at exact closing prices."""
+    """Refresh views before sizing a complete rebalance at exact closing prices.
+
+    *frozen* (backtests, see backtesting/delisting.py): held names with no
+    close this session, valued at their last close but never traded, and
+    with it, targets lacking a close are skipped instead of failing the run.
+    Without it every held and targeted name must have an exact close.
+    """
     if session <= original.as_of or session > completed_through():
         raise ValueError(f"execution session {session} must follow {original.as_of} and be complete")
     if fund.spec != original.spec:
@@ -127,9 +137,21 @@ def execute_decision(
     validate_targets(spec, effective.strategies, effective.final_weights)
     held = broker.positions()
     targets = {t: w for t, w in effective.final_weights.items() if w != 0}
+    skipped: list[TickerSkip] = []
+    frozen_value = 0.0
+    if frozen is not None:
+        frozen_held = {t: p for t, p in held.items() if t in frozen}
+        held = {t: p for t, p in held.items() if t not in frozen}
+        frozen_value = sum(p.shares * frozen[t][0] for t, p in frozen_held.items())
+        for ticker in sorted(targets):
+            if ticker in frozen:
+                skipped.append(TickerSkip(ticker=ticker, reason=f"not trading on {session}; held at last close {frozen[ticker][1]}"))
+            elif not _has_exact_close(ticker, session, data_client):
+                skipped.append(TickerSkip(ticker=ticker, reason=f"no close on execution session {session}"))
+        targets = {t: w for t, w in targets.items() if t not in {s.ticker for s in skipped}}
     marks = exact_marks(list(set(held) | set(targets)), session, data_client)
     cash_before = broker.cash()
-    equity_before = cash_before + sum(p.shares * marks[t] for t, p in held.items())
+    equity_before = cash_before + frozen_value + sum(p.shares * marks[t] for t, p in held.items())
     if not isfinite(equity_before) or equity_before <= 0:
         raise ValueError(f"{spec.name}: equity on {session} must be finite and positive")
     orders = build_orders(targets, held, marks, equity_before)
@@ -147,12 +169,14 @@ def execute_decision(
     fills: list[Fill] = [broker.place_order(order) for order in orders]
     positions = {t: p.shares for t, p in broker.positions().items()}
     cash = broker.cash()
-    fields = effective.model_dump(exclude={"as_of", "marks"})
+    fields = effective.model_dump(exclude={"as_of", "marks", "skipped"})
+    all_marks = {**marks, **{t: frozen[t][0] for t in positions if frozen and t in frozen}}
     return CycleRecord(
-        **fields, as_of=original.as_of, marks=marks,
+        **fields, as_of=original.as_of, marks=all_marks, skipped=[*effective.skipped, *skipped],
         equity_before=equity_before, cash_before=cash_before,
         orders=orders, fills=fills, positions=positions, cash=cash,
-        nav=cash + sum(shares * marks[t] for t, shares in positions.items()),
+        nav=cash + sum(shares * all_marks[t] for t, shares in positions.items()),
+        frozen={t: frozen[t][1] for t in positions if frozen and t in frozen},
         original_assessment=original.model_copy(deep=True),
         refreshed_assessment=effective.model_copy(deep=True),
         execution_as_of=session, execution_policy="next_close",
@@ -179,6 +203,12 @@ def run_cycle(
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+def _has_exact_close(ticker: str, session: str, data_client: DataClient) -> bool:
+    """A tradable close on *session* (not a vendor's halted/delisted placeholder)."""
+    start = (_date.fromisoformat(session) - timedelta(days=_TRADABILITY_LOOKBACK_DAYS)).isoformat()
+    return session in tradable_closes(data_client, ticker, start, session)
+
 
 def _mark_prices(
     tickers: list[str],
