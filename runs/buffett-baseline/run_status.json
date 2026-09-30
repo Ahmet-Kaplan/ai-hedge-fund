@@ -1,0 +1,19 @@
+{
+  "llm_calls": 15,
+  "cache_hits": 14,
+  "cache_lookups": 29,
+  "input_tokens": 33384,
+  "output_tokens": 8798,
+  "cost_usd": 0.3095,
+  "errors": 0,
+  "consecutive_errors": 0,
+  "expected_calls": 1200,
+  "stopped": "projection guard: $0.0206/call x ~1200 calls projects $24.47 > $18.00",
+  "cycles_done": 1,
+  "projected_usd": 24.47,
+  "requests": {
+    "tiingo": 0,
+    "sec": 44
+  },
+  "elapsed_s": 145
+}

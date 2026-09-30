@@ -1,0 +1,4 @@
+15:15:17 120 rebalance dates, ~1200 agent assessments; budget $18.0
+15:17:00 cycle 1/119 executed 2016-08-01 · NAV $100,000 · LLM calls 10 · cache hits 10 · $0.21
+15:17:42 PROBE: 15 calls $0.309 ($0.0206/call), ~1171 calls left -> projected $24.47
+15:17:42 STOPPED SAFELY: projection guard: $0.0206/call x ~1200 calls projects $24.47 > $18.00
