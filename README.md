@@ -78,6 +78,30 @@ An LLM trained after your backtest window may remember how those companies did, 
 
 A mandate is the desk — strategies, staff, risk, capital, cadence — and never names tickers; `--tickers` says what to point it at for this run.
 
+## Paper trading on Alpaca
+
+`aihf-paper` runs a fund forward on an Alpaca **paper** account (simulated money;
+the client refuses any other endpoint). It trades exactly like the backtester:
+on the first session of each rebalance period it assesses with data through the
+previous close and submits market-on-close orders, so paper and backtest results
+are directly comparable.
+
+Add `APCA_API_KEY_ID` / `APCA_API_SECRET_KEY` (paper keys) to `~/.hedge-fund/.env`, then:
+
+```bash
+aihf-paper status               # account, halts, last NAV
+aihf-paper submit --dry-run     # see the plan, send nothing
+aihf-paper baseline             # backtest fund, each strategy, SPY, equal-weight
+aihf-paper install-schedule     # reconcile 09:00 ET, submit 10:00 ET, weekdays
+aihf-paper report               # paper return vs benchmark, slippage, fills
+```
+
+Defaults: `hedge_fund/fund/paper.yaml` (all four strategies, long/short, unlevered,
+10% per name) over `hedge_fund/fund/paper_universe.list` (32 large caps). The books
+live in `~/.hedge-fund/paper/<fund>/`. Safety: `touch ~/.hedge-fund/KILL` stops all
+trading; a 15% drawdown from peak halts and flattens the fund until
+`aihf-paper resume`; `aihf-paper flatten --yes` does the same by hand.
+
 ## Development
 
 ```bash

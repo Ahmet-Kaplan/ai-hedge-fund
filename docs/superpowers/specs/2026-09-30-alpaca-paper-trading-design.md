@@ -31,7 +31,7 @@ neutralization, regime filter, dynamic allocator, leverage, live money.
 | Decision | Choice |
 |---|---|
 | Data / LLM | Financial Datasets + an LLM provider key + Alpaca paper keys; all strategies enabled |
-| Universe | Fixed list of ~30 liquid large caps across sectors (`hedge_fund/fund/paper_universe.txt`) |
+| Universe | Fixed list of ~30 liquid large caps across sectors (`hedge_fund/fund/paper_universe.list`) |
 | Operation | Scheduled, auto-execute on the paper account |
 | Risk | Long/short, unlevered: `max_position_pct: 0.10`, `max_gross_exposure: 1.0`; 15% drawdown halt |
 | Execution | Market-on-close (MOC) orders — parity with the backtest's next-close fills |
@@ -175,7 +175,7 @@ aihf-paper install-schedule / uninstall-schedule
 ```
 
 Defaults: `--mandate hedge_fund/fund/paper.yaml`, `--universe
-hedge_fund/fund/paper_universe.txt`.
+hedge_fund/fund/paper_universe.list`.
 
 ### 2.7 Mandate and universe
 
@@ -200,7 +200,7 @@ rebalance: weekly
 benchmark: SPY
 ```
 
-`hedge_fund/fund/paper_universe.txt` (32 names, one per line):
+`hedge_fund/fund/paper_universe.list` (32 names, one per line):
 AAPL MSFT NVDA GOOGL META AVGO ORCL · AMZN TSLA HD MCD · WMT PG KO COST ·
 LLY UNH JNJ MRK ABBV · JPM BAC V GS · XOM CVX · CAT GE · NFLX DIS · NEE · BRK.B
 

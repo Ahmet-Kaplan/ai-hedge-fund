@@ -87,14 +87,14 @@ can be backtested and combined — is a great first contribution:
 | Risk model — hard caps (pod-level budgets + fund-level limits) | 🚧 (fund-level position + gross caps ship; pod budgets with pods) |
 | Broker protocol — pluggable, mirrors the `DataClient` pattern | ✅ |
 | ↳ Simulated broker (backtest) | ✅ |
-| ↳ Paper broker | ⬜ |
+| ↳ Paper broker | ✅ (Alpaca paper via `aihf-paper`: MOC orders, reconcile, ledger) |
 | ↳ Live broker (Interactive Brokers / Alpaca) — opt-in plugin, off by default | ⬜ |
 
 ## Autonomy
 
 | Item | Status |
 |------|--------|
-| Scheduler / daemon — market-calendar cron, idempotent ticks, kill-switch | ⬜ |
+| Scheduler / daemon — market-calendar cron, idempotent ticks, kill-switch | 🚧 (macOS launchd for the paper fund, idempotent submit, kill switch, drawdown halt) |
 | Observability — per-cycle events, notifications, heartbeat | ⬜ |
 | Research lab — backtest candidate strategies/allocators alongside the live fund | ⬜ |
 | Strategy generator — composes candidate strategies from the building blocks (analysts × policies × parameters), driven by the fund's mandate | ⬜ |

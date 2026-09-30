@@ -45,7 +45,7 @@
 | `hedge_fund/live/launchd.py` | create | LaunchAgent plists, install/uninstall, `notify` |
 | `hedge_fund/live/cli.py` | create | `aihf-paper` entry point |
 | `hedge_fund/fund/paper.yaml` | create | paper mandate |
-| `hedge_fund/fund/paper_universe.txt` | create | 32-name universe |
+| `hedge_fund/fund/paper_universe.list` | create | 32-name universe |
 | `pyproject.toml`, `.env.example`, `README.md`, `ROADMAP.md` | modify | script entry, keys, docs |
 
 Tests live beside the code as `test_*.py` (project convention).
@@ -2448,7 +2448,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 14: Mandate, universe, and `aihf-paper` CLI
 
 **Files:**
-- Create: `hedge_fund/fund/paper.yaml`, `hedge_fund/fund/paper_universe.txt`, `hedge_fund/live/cli.py`
+- Create: `hedge_fund/fund/paper.yaml`, `hedge_fund/fund/paper_universe.list`, `hedge_fund/live/cli.py`
 - Modify: `hedge_fund/live/__init__.py`, `pyproject.toml`
 - Test: `hedge_fund/live/test_cli.py`
 
@@ -2500,7 +2500,7 @@ rebalance: weekly
 benchmark: SPY
 ```
 
-- [ ] **Step 2: Create `hedge_fund/fund/paper_universe.txt`**
+- [ ] **Step 2: Create `hedge_fund/fund/paper_universe.list`**
 
 ```
 # Paper fund universe: liquid large caps across sectors. One or more per line; # starts a comment.
@@ -2598,7 +2598,7 @@ logger = logging.getLogger("aihf-paper")
 
 PACKAGE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_MANDATE = PACKAGE_DIR / "fund" / "paper.yaml"
-DEFAULT_UNIVERSE = PACKAGE_DIR / "fund" / "paper_universe.txt"
+DEFAULT_UNIVERSE = PACKAGE_DIR / "fund" / "paper_universe.list"
 
 
 def load_universe(path: str | Path) -> list[str]:
@@ -2797,7 +2797,7 @@ Expected: all tests PASS; help lists the nine commands.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add hedge_fund/fund/paper.yaml hedge_fund/fund/paper_universe.txt hedge_fund/live/cli.py hedge_fund/live/__init__.py hedge_fund/live/test_cli.py pyproject.toml
+git add hedge_fund/fund/paper.yaml hedge_fund/fund/paper_universe.list hedge_fund/live/cli.py hedge_fund/live/__init__.py hedge_fund/live/test_cli.py pyproject.toml
 git commit -m "Add the paper mandate, universe and aihf-paper CLI
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -2842,7 +2842,7 @@ aihf-paper report               # paper return vs benchmark, slippage, fills
 ```
 
 Defaults: `hedge_fund/fund/paper.yaml` (all four strategies, long/short, unlevered,
-10% per name) over `hedge_fund/fund/paper_universe.txt` (32 large caps). The books
+10% per name) over `hedge_fund/fund/paper_universe.list` (32 large caps). The books
 live in `~/.hedge-fund/paper/<fund>/`. Safety: `touch ~/.hedge-fund/KILL` stops all
 trading; a 15% drawdown from peak halts and flattens the fund until
 `aihf-paper resume`; `aihf-paper flatten --yes` does the same by hand.
