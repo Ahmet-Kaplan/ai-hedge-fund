@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 from datetime import date as _date
+from datetime import timedelta
 from typing import Callable, Literal
 
 import numpy as np
 from pydantic import BaseModel, Field
 
+from hedge_fund.brokers.models import Order
 from hedge_fund.brokers.sim import SimBroker
 from hedge_fund.data.protocol import DataClient
 from hedge_fund.data.sessions import previous_day, session_closes
 from hedge_fund.fund import Fund, normalize_universe
 from hedge_fund.pipeline.models import CycleRecord, DecisionRecord, PendingRunResult
-from hedge_fund.pipeline.run_cycle import assess_fund, exact_marks, execute_decision
+from hedge_fund.pipeline.run_cycle import assess_fund, exact_marks, execute_decision, has_close
 
 
 class ReplaySchedule(BaseModel):
@@ -84,7 +86,8 @@ class FundBacktestResult(BaseModel):
 
 
 def backtest_fund(
-    fund: Fund, start: str, end: str, data_client: DataClient, universe: list[str], *,
+    fund: Fund, start: str, end: str, data_client: DataClient,
+    universe: list[str] | Callable[[str], list[str]], *,
     on_cycle: Callable[[int, int, CycleRecord], None] | None = None,
     on_valuation: Callable[[int, int, DailyValuation], None] | None = None,
 ) -> FundBacktestResult:
@@ -93,9 +96,17 @@ def backtest_fund(
     Callbacks receive a zero-based index, the total count, and a record.
     Executed-cycle and valuation counts are independent; the final proposal
     can remain pending without extending the requested window.
+
+    `universe` is a fixed list, or a function of the assessment date for a
+    point-in-time universe. With a function, names that stop trading are
+    handled as delistings: a held one is sold at its last close, and one that
+    can't trade on its execution day is skipped. A fixed list keeps failing
+    loud on a missing close.
     """
     spec = fund.spec
-    universe = normalize_universe(universe)
+    dynamic = callable(universe)
+    fixed = None if dynamic else normalize_universe(universe)
+    seen: list[str] = []
     schedule = build_schedule(data_client, spec.benchmark, start, end, spec.rebalance)
     dates = list(schedule.closes)
     broker = SimBroker(cash=spec.capital, commission_bps=spec.costs.commission_bps)
@@ -106,6 +117,8 @@ def backtest_fund(
     benchmark_nav: list[float] = []
     n_cycles = sum(day is not None for day in schedule.execution_dates.values())
     for i, session in enumerate(dates):
+        if dynamic:
+            _close_delisted(broker, session, data_client)
         if i > 0 and spec.costs.borrow_bps_annual > 0:
             # Shorts held since the previous close pay borrow for the calendar days in between.
             shorts = [t for t, p in broker.positions().items() if p.shares < 0]
@@ -113,7 +126,7 @@ def backtest_fund(
                 days = (_date.fromisoformat(session) - _date.fromisoformat(dates[i - 1])).days
                 broker.accrue_borrow(exact_marks(shorts, session, data_client), days, spec.costs.borrow_bps_annual)
         if session in due:
-            record = execute_decision(fund, due.pop(session), session, broker, data_client)
+            record = execute_decision(fund, due.pop(session), session, broker, data_client, drop_unpriced=dynamic)
             records.append(record)
             if on_cycle is not None:
                 on_cycle(len(records) - 1, n_cycles, record)
@@ -126,7 +139,9 @@ def backtest_fund(
                 as_of=session, nav=nav[-1], benchmark_nav=benchmark_nav[-1],
             ))
         if session in schedule.execution_dates:
-            proposal = assess_fund(fund, session, data_client, universe)
+            members = normalize_universe(universe(session)) if dynamic else fixed
+            seen.extend(t for t in members if t not in seen)
+            proposal = assess_fund(fund, session, data_client, members)
             execution = schedule.execution_dates[session]
             if execution is None:
                 pending.append(PendingRunResult(
@@ -137,11 +152,25 @@ def backtest_fund(
                 due[execution] = proposal
     return FundBacktestResult(
         fund=spec.name, start=dates[0], end=dates[-1], rebalance=spec.rebalance,
-        benchmark=spec.benchmark, universe=universe, capital=spec.capital,
+        benchmark=spec.benchmark, universe=seen if dynamic else fixed, capital=spec.capital,
         dates=dates, nav=nav, benchmark_nav=benchmark_nav,
         metrics=performance_metrics(spec.capital, dates, nav, benchmark_nav, records, len(pending), broker.costs()),
         records=records, pending=pending,
     )
+
+
+def _close_delisted(broker: SimBroker, session: str, data_client: DataClient) -> None:
+    """Sell (or cover) any held name with no close on `session` at its last close."""
+    for ticker, position in broker.positions().items():
+        if has_close(ticker, session, data_client):
+            continue
+        start = (_date.fromisoformat(session) - timedelta(days=30)).isoformat()
+        prior = [bar for bar in data_client.get_prices(ticker, start, session) if bar.time[:10] < session]
+        if not prior:
+            raise ValueError(f"{ticker}: no close in the 30 days before {session} to close the position at")
+        last = max(prior, key=lambda bar: bar.time).close
+        broker.place_order(Order(ticker=ticker, side="sell" if position.shares > 0 else "buy",
+                                 quantity=abs(position.shares), price=last))
 
 
 def rebalance_grid(days: list[str], cadence: str) -> list[str]:

@@ -315,3 +315,37 @@ def test_borrow_accrues_daily_on_short_book():
 
 def test_costs_default_to_zero():
     assert _run().metrics.total_costs == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Point-in-time universes and delistings
+# ---------------------------------------------------------------------------
+
+def test_dynamic_universe_sells_delisted_names_at_their_last_close():
+    series = {ticker: dict(values) for ticker, values in SERIES.items()}
+    series["GONE"] = {"2024-06-07": 50.0, "2024-06-10": 50.0, "2024-06-11": 40.0}   # last trade Tuesday
+    fund = Fund(_spec(risk={"max_position_pct": 0.5, "max_gross_exposure": 1.0}),
+                models={"solo": [FakeAnalyst("a", views={"AAPL": 1.0, "GONE": 1.0})]})
+    asked = []
+
+    def universe(day):
+        asked.append(day)
+        return ["AAPL", "GONE"]
+
+    result = backtest_fund(fund, "2024-06-03", "2024-06-21", FakeDataClient(series), universe)
+    assert asked and result.universe == ["AAPL", "GONE"]
+    monday = result.records[0]
+    assert monday.positions == {"AAPL": 250, "GONE": 1000}
+    # Wednesday: GONE has no close, so it was sold at Tuesday's 40 → 250*200 + 40_000 in the book.
+    assert result.nav[result.dates.index("2024-06-12")] == pytest.approx(250 * 200 + 40_000)
+    # The next Monday's plan still liked GONE (stale Tuesday close), but it can't trade: skipped, not a crash.
+    assert "GONE" not in result.records[1].positions
+
+
+def test_fixed_universe_still_fails_loud_on_a_missing_close():
+    series = {ticker: dict(values) for ticker, values in SERIES.items()}
+    series["GONE"] = {"2024-06-07": 50.0, "2024-06-10": 50.0}
+    fund = Fund(_spec(risk={"max_position_pct": 0.5, "max_gross_exposure": 1.0}),
+                models={"solo": [FakeAnalyst("a", views={"AAPL": 1.0, "GONE": 1.0})]})
+    with pytest.raises(ValueError, match="GONE"):
+        backtest_fund(fund, "2024-06-03", "2024-06-21", FakeDataClient(series), ["AAPL", "GONE"])

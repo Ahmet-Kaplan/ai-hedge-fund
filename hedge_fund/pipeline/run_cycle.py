@@ -137,6 +137,11 @@ def exact_marks(tickers: list[str], session: str, data_client: DataClient) -> di
     return marks
 
 
+def has_close(ticker: str, session: str, data_client: DataClient) -> bool:
+    return any(bar.time[:10] == session and isfinite(bar.close) and bar.close > 0
+               for bar in data_client.get_prices(ticker, session, session))
+
+
 def check_projected_book(
     orders: list[Order], held: dict[str, int], marks: dict[str, float],
     equity: float, limits: RiskLimits, exempt: frozenset[str] | set[str] = frozenset(),
@@ -161,7 +166,7 @@ def check_projected_book(
 
 def execute_decision(
     fund: Fund, original: DecisionRecord, session: str,
-    broker: Broker, data_client: DataClient,
+    broker: Broker, data_client: DataClient, *, drop_unpriced: bool = False,
 ) -> CycleRecord:
     """Refresh views before sizing a complete rebalance at exact closing prices."""
     if session <= original.as_of or session > completed_through():
@@ -176,6 +181,10 @@ def execute_decision(
     validate_targets(spec, effective.strategies, effective.final_weights)
     held = broker.positions()
     targets = target_book(effective)
+    if drop_unpriced:
+        # Point-in-time backtests: a name taken over or delisted between the decision
+        # and the execution close simply can't be bought; its weight stays in cash.
+        targets = {t: w for t, w in targets.items() if has_close(t, session, data_client)}
     marks = exact_marks(list(set(held) | set(targets)), session, data_client)
     cash_before = broker.cash()
     equity_before = cash_before + sum(p.shares * marks[t] for t, p in held.items())
