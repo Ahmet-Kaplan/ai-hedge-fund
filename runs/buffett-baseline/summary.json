@@ -1,0 +1,50 @@
+{
+  "period": [
+    "2016-07-01",
+    "2026-06-30"
+  ],
+  "initial_value": 100000.0,
+  "final_value": 319073.66,
+  "metrics": {
+    "total_return_pct": 2.190737,
+    "annualized_return_pct": 0.123078,
+    "sharpe_ratio": 0.8269,
+    "max_drawdown_pct": 0.320694,
+    "benchmark_return_pct": 2.557403,
+    "excess_return_pct": -0.366666,
+    "n_cycles": 119,
+    "n_orders": 542,
+    "n_pending": 1,
+    "n_delistings": 0
+  },
+  "trades": 542,
+  "continuation": {
+    "new_anthropic_calls": 406,
+    "cache_hits": 2539,
+    "input_tokens": 920238,
+    "output_tokens": 238256,
+    "cost_usd": 8.446,
+    "segments": 2,
+    "segment1_stop": "data/engine failure: EdgarClientError: GET https://www.sec.gov/Archives/edgar/data/1067983/000095017023004451/R1.htm failed: HTTPSConnectionPool(host='www.sec.gov', port=443): Max retries exceeded with url: /Archives/edgar/data/1067983/000095017023004451/R1.htm (Caused by ProxyError('Unable to connect to proxy', RemoteDisconnected('Remot"
+  },
+  "previous_attempt_cost_usd": 0.3095,
+  "total_estimated_anthropic_cost_usd": 8.7555,
+  "requests": {
+    "financial_datasets": 0,
+    "tiingo": 0,
+    "sec": 115
+  },
+  "llm_cache_entries": 420,
+  "audit": {
+    "data_integrity": "PASS",
+    "integrity_problems": [],
+    "look_ahead": "PASS",
+    "look_ahead_problems": [],
+    "fundamental_queries_checked": 1200,
+    "prompts_checked_for_anonymisation": 420,
+    "audit_requests": {
+      "tiingo": 0,
+      "sec": 0
+    }
+  }
+}

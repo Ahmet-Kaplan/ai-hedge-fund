@@ -76,11 +76,18 @@ for rec in decisions:
     allowed = set(snap.tickers) if snap else set()
     if set(rec["universe"]) - allowed:
         lookahead.append(f"{as_of}: universe {sorted(set(rec['universe']) - allowed)} not in snapshot {snap and snap.as_of}")
+    # A CycleRecord keeps the month-end as_of but carries the signals of the
+    # refresh assessed at previous_day(execution session) (run_cycle.execute_decision).
+    # The bound is therefore: every input date strictly before the execution
+    # session; an unexecuted assessment's inputs no later than its own as_of.
+    limit_exclusive = rec.get("execution_as_of")
     for sr in rec["strategies"]:
         for sig in sr["signals"]:
-            pairs.add((sig["ticker"], as_of))
-            if sig["date"] > as_of:
-                lookahead.append(f"{sig['ticker']}: signal dated {sig['date']} after decision {as_of}")
+            pairs.add((sig["ticker"], sig["date"]))
+            if limit_exclusive and sig["date"] >= limit_exclusive:
+                lookahead.append(f"{sig['ticker']}: signal dated {sig['date']} not before execution {limit_exclusive}")
+            if not limit_exclusive and sig["date"] > as_of:
+                lookahead.append(f"{sig['ticker']}: signal dated {sig['date']} after assessment {as_of}")
 
 with make_data_client() as fd:
     for ticker, as_of in sorted(pairs):
@@ -92,7 +99,7 @@ with make_data_client() as fd:
 
 # Blind prompts: no ticker symbols, company names or calendar years.
 cache_files = sorted((OUT / "llm_cache").glob("*.json"))
-year_re = re.compile(r"\b(19[89]\d|20[0-3]\d)\b")
+year_re = re.compile(r"\b(19[89]\d|20[0-3]\d)\b(?![.\dB])")  # not a figure like 2021.0B
 universe = set(res["universe"])
 leaks = 0
 for p in cache_files:

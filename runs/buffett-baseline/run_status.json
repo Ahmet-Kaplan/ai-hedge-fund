@@ -1,0 +1,21 @@
+{
+  "llm_calls": 139,
+  "cache_hits": 1641,
+  "cache_lookups": 1780,
+  "input_tokens": 318748,
+  "output_tokens": 75747,
+  "cost_usd": 2.7899,
+  "errors": 0,
+  "consecutive_errors": 0,
+  "expected_calls": 1200,
+  "stopped": null,
+  "cycles_done": 119,
+  "parse_failures": 0,
+  "budget_usd": 20.34,
+  "dry_run": false,
+  "requests": {
+    "tiingo": 0,
+    "sec": 25
+  },
+  "elapsed_s": 1290
+}

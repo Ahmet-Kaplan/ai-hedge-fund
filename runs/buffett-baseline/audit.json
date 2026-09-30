@@ -1,0 +1,12 @@
+{
+  "data_integrity": "PASS",
+  "integrity_problems": [],
+  "look_ahead": "PASS",
+  "look_ahead_problems": [],
+  "fundamental_queries_checked": 1200,
+  "prompts_checked_for_anonymisation": 420,
+  "audit_requests": {
+    "tiingo": 0,
+    "sec": 0
+  }
+}
