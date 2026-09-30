@@ -11,7 +11,8 @@ def test_shipped_strategy_library_is_valid():
     library = sorted(Path(__file__).parent.parent.glob("strategies/*.yaml"))
     assert library, "strategy library is empty"
     modes = {"deep-value": "long_only", "fundamental-ls": "dollar_neutral",
-             "inflections": "long_short", "earnings-drift": "long_short"}
+             "inflections": "long_short", "earnings-drift": "long_short",
+             "momentum": "long_short"}
     for path in library:
         strategy = load_strategy(path)
         assert strategy.name == path.stem

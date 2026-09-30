@@ -1,0 +1,11 @@
+# Momentum — systematic, price-only, long/short.
+# Long the strongest 12-1 month trends, short the weakest, each scaled by its
+# own volatility. No LLM: cheap to run and testable over a decade of prices.
+name: momentum
+display_name: Momentum
+models:
+  - name: momentum
+blend:
+  mode: long_short
+  method: conviction_weighted
+  gross_target: 1.0
