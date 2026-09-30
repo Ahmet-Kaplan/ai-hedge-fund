@@ -54,3 +54,24 @@ def test_short_target_sells_past_zero():
     assert len(orders) == 1
     assert orders[0].side == "sell"
     assert orders[0].quantity == 20
+
+
+def test_check_projected_book_enforces_caps():
+    import pytest
+    from hedge_fund.brokers.models import Order
+    from hedge_fund.pipeline.run_cycle import check_projected_book
+    from hedge_fund.risk.limits import RiskLimits
+
+    limits = RiskLimits(max_position_pct=0.5, max_gross_exposure=1.0)
+    marks = {"A": 100.0, "B": 100.0}
+    ok = [Order(ticker="A", side="buy", quantity=500, price=100.0)]
+    check_projected_book(ok, {}, marks, 100_000.0, limits)
+    too_big = [Order(ticker="A", side="buy", quantity=600, price=100.0)]
+    with pytest.raises(ValueError, match="max_position_pct"):
+        check_projected_book(too_big, {}, marks, 100_000.0, limits)
+    # Each name within 50%, but 50% + 50% + 10% gross breaches 100%.
+    too_gross = [Order(ticker="A", side="buy", quantity=400, price=100.0),
+                 Order(ticker="B", side="sell", quantity=500, price=100.0),
+                 Order(ticker="C", side="buy", quantity=100, price=100.0)]
+    with pytest.raises(ValueError, match="max_gross_exposure"):
+        check_projected_book(too_gross, {"A": 100}, {**marks, "C": 100.0}, 100_000.0, limits)

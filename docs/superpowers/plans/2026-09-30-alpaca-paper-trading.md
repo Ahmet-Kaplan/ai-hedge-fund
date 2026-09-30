@@ -495,10 +495,12 @@ def test_check_projected_book_enforces_caps():
     too_big = [Order(ticker="A", side="buy", quantity=600, price=100.0)]
     with pytest.raises(ValueError, match="max_position_pct"):
         check_projected_book(too_big, {}, marks, 100_000.0, limits)
-    too_gross = [Order(ticker="A", side="buy", quantity=500, price=100.0),
-                 Order(ticker="B", side="sell", quantity=500, price=100.0)]
+    # Each name within 50%, but 50% + 50% + 10% gross breaches 100%.
+    too_gross = [Order(ticker="A", side="buy", quantity=400, price=100.0),
+                 Order(ticker="B", side="sell", quantity=500, price=100.0),
+                 Order(ticker="C", side="buy", quantity=100, price=100.0)]
     with pytest.raises(ValueError, match="max_gross_exposure"):
-        check_projected_book(too_gross, {"A": 100}, marks, 100_000.0, limits)
+        check_projected_book(too_gross, {"A": 100}, {**marks, "C": 100.0}, 100_000.0, limits)
 ```
 
 - [ ] **Step 2: Run to verify failure**

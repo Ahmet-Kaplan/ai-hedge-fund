@@ -6,7 +6,7 @@ from datetime import date as _date
 from datetime import timedelta
 from math import isfinite
 
-from hedge_fund.brokers.models import Fill
+from hedge_fund.brokers.models import Fill, Order
 from hedge_fund.brokers.protocol import Broker
 from hedge_fund.data.protocol import DataClient
 from hedge_fund.data.sessions import completed_through, previous_day, session_closes
@@ -22,7 +22,7 @@ from hedge_fund.pipeline.models import (
 )
 from hedge_fund.portfolio.construction import blend_signals, WEIGHT_TOLERANCE
 from hedge_fund.portfolio.validation import validate_targets
-from hedge_fund.risk.limits import apply_limits
+from hedge_fund.risk.limits import apply_limits, RiskLimits
 from hedge_fund.signals import get_investment_approach
 
 # How far back to look for the most recent close: covers weekends, holiday
@@ -110,6 +110,24 @@ def exact_marks(tickers: list[str], session: str, data_client: DataClient) -> di
     return marks
 
 
+def check_projected_book(
+    orders: list[Order], held: dict[str, int], marks: dict[str, float],
+    equity: float, limits: RiskLimits,
+) -> None:
+    """Raise if the book after these orders would breach the fund's hard limits."""
+    projected = dict(held)
+    for order in orders:
+        projected[order.ticker] = projected.get(order.ticker, 0) + (
+            order.quantity if order.side == "buy" else -order.quantity
+        )
+    weights = {t: shares * marks[t] / equity for t, shares in projected.items()}
+    for ticker, weight in weights.items():
+        if not isfinite(weight) or abs(weight) > limits.max_position_pct + WEIGHT_TOLERANCE:
+            raise ValueError(f"{ticker}: projected position violates max_position_pct")
+    if sum(abs(w) for w in weights.values()) > limits.max_gross_exposure + WEIGHT_TOLERANCE:
+        raise ValueError("projected portfolio violates max_gross_exposure")
+
+
 def execute_decision(
     fund: Fund, original: DecisionRecord, session: str,
     broker: Broker, data_client: DataClient,
@@ -133,17 +151,7 @@ def execute_decision(
     if not isfinite(equity_before) or equity_before <= 0:
         raise ValueError(f"{spec.name}: equity on {session} must be finite and positive")
     orders = build_orders(targets, held, marks, equity_before)
-    projected = {t: p.shares for t, p in held.items()}
-    for order in orders:
-        projected[order.ticker] = projected.get(order.ticker, 0) + (
-            order.quantity if order.side == "buy" else -order.quantity
-        )
-    weights = {t: shares * marks[t] / equity_before for t, shares in projected.items()}
-    for ticker, weight in weights.items():
-        if not isfinite(weight) or abs(weight) > spec.risk.max_position_pct + WEIGHT_TOLERANCE:
-            raise ValueError(f"{ticker}: projected position violates max_position_pct")
-    if sum(abs(w) for w in weights.values()) > spec.risk.max_gross_exposure + WEIGHT_TOLERANCE:
-        raise ValueError("projected portfolio violates max_gross_exposure")
+    check_projected_book(orders, {t: p.shares for t, p in held.items()}, marks, equity_before, spec.risk)
     fills: list[Fill] = [broker.place_order(order) for order in orders]
     positions = {t: p.shares for t, p in broker.positions().items()}
     cash = broker.cash()
