@@ -1,7 +1,7 @@
 """aihf-paper — run the fund on an Alpaca paper account.
 
     aihf-paper status                  account, halts, last NAV, schedule
-    aihf-paper submit [--dry-run]      plan (and send) today's MOC rebalance
+    aihf-paper submit [--dry-run] [--now]  plan (and send) today's MOC rebalance
     aihf-paper reconcile               record the previous session's fills + NAV
     aihf-paper report [--backtest F] [--attribution]
     aihf-paper baseline [--start D] [--end D]
@@ -60,8 +60,10 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--model", help="LLM for the investor agents, e.g. claude-opus-5-5")
         return p
 
-    command("submit", "plan and send today's market-on-close rebalance").add_argument(
-        "--dry-run", action="store_true", help="plan and save, send nothing (works any day)")
+    p = command("submit", "plan and send today's market-on-close rebalance")
+    p.add_argument("--dry-run", action="store_true", help="plan and save, send nothing (works any day)")
+    p.add_argument("--now", action="store_true",
+                   help="rebalance today even if it is not the first session of the period (e.g. to start the fund)")
     command("reconcile", "record the previous session's fills and closing NAV")
     p = command("report", "paper performance from the ledger")
     p.add_argument("--backtest", help="a backtest result JSON to compare over the same dates")
@@ -101,7 +103,8 @@ def _submit(args, spec: FundSpec, ledger: Ledger) -> int:
     fund = Fund(spec)
     with FDClient() as raw:
         result = submit(fund, load_universe(args.universe), AlpacaPaperClient(), CachedDataClient(raw),
-                        ledger, now=datetime.now(NEW_YORK), dry_run=args.dry_run)
+                        ledger, now=datetime.now(NEW_YORK), dry_run=args.dry_run,
+                        force_rebalance=getattr(args, "now", False))
     print(f"{result.session}: {result.status} {result.detail}")
     if result.plan:
         print(f"equity ${result.plan.equity:,.2f} · {len(result.plan.targets)} targets · {len(result.plan.orders)} orders")

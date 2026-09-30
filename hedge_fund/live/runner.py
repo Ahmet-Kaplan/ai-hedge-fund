@@ -64,12 +64,15 @@ class SubmitResult(BaseModel):
 
 def submit(
     fund: Fund, universe: list[str], client: PaperAccount, data_client: DataClient,
-    ledger: Ledger, *, now: datetime, dry_run: bool = False, kill_path: Path = KILL_PATH,
+    ledger: Ledger, *, now: datetime, dry_run: bool = False, force_rebalance: bool = False,
+    kill_path: Path = KILL_PATH,
 ) -> SubmitResult:
     """Plan and send today's market-on-close orders, or say exactly why not.
 
     A dry run skips the calendar, clock and rebalance-day guards (it never
     sends anything, so the plan can be inspected any day) and never halts.
+    force_rebalance trades today even mid-period (e.g. to start the fund);
+    every other guard still applies.
     """
     now = now.astimezone(NEW_YORK)
     session = now.date().isoformat()
@@ -101,7 +104,8 @@ def submit(
         status: SubmitStatus = "flattening"
     else:
         previous = [s for s in sessions if s < session]
-        if not dry_run and (not previous or not is_rebalance_day(session, previous[-1], fund.spec.rebalance)):
+        scheduled = bool(previous) and is_rebalance_day(session, previous[-1], fund.spec.rebalance)
+        if not dry_run and not force_rebalance and not scheduled:
             return done("not_rebalance_day")
         status = "submitted"
 

@@ -218,3 +218,15 @@ def test_session_to_reconcile():
     assert session_to_reconcile(client, datetime(2024, 6, 8, 17, 0, tzinfo=NEW_YORK)) == "2024-06-07"
     with pytest.raises(ValueError, match="15:50"):
         session_to_reconcile(client, datetime(2024, 6, 11, 16, 0, tzinfo=NEW_YORK))
+
+
+def test_force_rebalance_trades_mid_week_but_keeps_other_guards(ledger, tmp_path):
+    fund, _ = make_fund({"AAPL": 1.0})
+    client = FakeAlpaca()
+    result = submit(fund, ["AAPL"], client, FakeDataClient(SERIES), ledger, now=TUE_10AM,
+                    force_rebalance=True, kill_path=tmp_path / "KILL")
+    assert result.status == "submitted"
+    assert client.submitted == [("AAPL", "buy", 500, "paper-test-2024-06-11-AAPL")]
+    late = submit(fund, ["AAPL"], FakeAlpaca(), FakeDataClient(SERIES), ledger,
+                  now=datetime(2024, 6, 11, 15, 46, tzinfo=NEW_YORK), force_rebalance=True, kill_path=tmp_path / "KILL")
+    assert late.status == "too_late"
