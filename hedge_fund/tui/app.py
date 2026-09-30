@@ -58,7 +58,7 @@ from hedge_fund.llm import make_llm, provider_for, ThesisStream
 from hedge_fund.models import Signal
 from hedge_fund.pipeline import CycleRecord, DecisionRecord, PendingRunResult, run_cycle
 from hedge_fund.pipeline.run_cycle import _MARK_LOOKBACK_DAYS
-from hedge_fund.signals import ALPHA_MODEL_REGISTRY, get_investment_approach, LLMAgent
+from hedge_fund.signals import ALPHA_MODEL_REGISTRY, BENCHMARK_MODELS, get_investment_approach, LLMAgent
 from hedge_fund.tui.keys import (
     apply_credentials,
     ENV_PATH,
@@ -1428,6 +1428,7 @@ class BuilderScreen(Screen):
                         *(
                             Selection(self._agent_prompt(key, cls), key)
                             for key, cls in ALPHA_MODEL_REGISTRY.items()
+                            if key not in BENCHMARK_MODELS
                         ),
                         id="agent-list",
                     )

@@ -151,3 +151,17 @@ class TestPEADPredict:
         fd = MockFDClient([_rec("2025-06-30", "2025-08-01", "BEAT")])
         sig = PEADModel().predict("TEST", "2025-08-01", fd)
         assert isinstance(sig, Signal)
+
+
+class TestEqualWeight:
+    def test_full_long_view_on_every_name(self):
+        from hedge_fund.signals import ALPHA_MODEL_REGISTRY, get_investment_approach
+        from hedge_fund.signals.equal_weight import EqualWeightModel
+        sig = EqualWeightModel().predict("ANY", "2025-01-02", data_client=None)
+        assert (sig.model_name, sig.ticker, sig.value) == ("equal_weight", "ANY", 1.0)
+        assert ALPHA_MODEL_REGISTRY["equal_weight"] is EqualWeightModel
+        assert get_investment_approach("equal_weight") == "long_only"
+
+    def test_marked_as_benchmark(self):
+        from hedge_fund.signals import BENCHMARK_MODELS
+        assert "equal_weight" in BENCHMARK_MODELS

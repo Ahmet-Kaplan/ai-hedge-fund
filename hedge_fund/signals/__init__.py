@@ -7,6 +7,7 @@ from typing import cast
 from hedge_fund.signals.base import AlphaModel, InvestmentApproach, QuantModel
 from hedge_fund.signals.buffett import BuffettAgent
 from hedge_fund.signals.druckenmiller import DruckenmillerAgent
+from hedge_fund.signals.equal_weight import EqualWeightModel
 from hedge_fund.signals.graham import GrahamAgent
 from hedge_fund.signals.llm_agent import LLMAgent
 from hedge_fund.signals.lynch import LynchAgent
@@ -16,6 +17,7 @@ from hedge_fund.signals.pead import PEADModel
 ALPHA_MODEL_REGISTRY: dict[str, type[AlphaModel]] = {
     # Quant models
     "pead": PEADModel,
+    "equal_weight": EqualWeightModel,
     # LLM investor agents
     "buffett": BuffettAgent,
     "munger": MungerAgent,
@@ -23,6 +25,10 @@ ALPHA_MODEL_REGISTRY: dict[str, type[AlphaModel]] = {
     "lynch": LynchAgent,
     "druckenmiller": DruckenmillerAgent,
 }
+
+# Registered so the engine can run them, but yardsticks, not analysts: the
+# fund builder does not offer them as staff.
+BENCHMARK_MODELS = frozenset({"equal_weight"})
 
 
 def get_investment_approach(name: str) -> InvestmentApproach:
@@ -50,6 +56,8 @@ __all__ = [
     "LynchAgent",
     "DruckenmillerAgent",
     "PEADModel",
+    "EqualWeightModel",
+    "BENCHMARK_MODELS",
     "ALPHA_MODEL_REGISTRY",
     "get_investment_approach",
 ]
