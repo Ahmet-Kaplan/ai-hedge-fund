@@ -18,6 +18,7 @@ def build_orders(
     positions: dict[str, Position],
     marks: dict[str, float],
     equity: float,
+    min_trade_pct: float = 0.0,
 ) -> list[Order]:
     """Diff the target book against the broker's current book.
 
@@ -28,6 +29,11 @@ def build_orders(
     Ordering: all sells first, then buys, alphabetical within each group —
     deterministic, and sells free the cash that buys consume within the
     same cycle.
+
+    Dust: an order that opens or adds to a position (moves it away from
+    zero) is skipped when its notional is below min_trade_pct of equity;
+    a trade that reduces or closes a position is never skipped, so the
+    book can always move back inside its limits.
 
     A KeyError on marks here means a pipeline bug upstream (run_cycle prices
     every tradeable and held name before calling this) — let it raise.
@@ -41,6 +47,9 @@ def build_orders(
         current_shares = positions[ticker].shares if ticker in positions else 0
         delta = target_shares - current_shares
         if delta == 0:
+            continue
+        adds_exposure = abs(target_shares) > abs(current_shares) and target_shares * current_shares >= 0
+        if adds_exposure and abs(delta) * mark < min_trade_pct * equity:
             continue
         order = Order(
             ticker=ticker,

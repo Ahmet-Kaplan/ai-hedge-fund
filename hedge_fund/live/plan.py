@@ -54,7 +54,7 @@ def plan_rebalance(
     if not isfinite(equity) or equity <= 0:
         raise ValueError(f"{fund.spec.name}: equity {equity} must be finite and positive to size orders")
     held = {t: Position(ticker=t, shares=s) for t, s in positions.items() if s}
-    orders = build_orders(targets, held, marks, equity)
+    orders = build_orders(targets, held, marks, equity, fund.spec.costs.min_trade_pct)
     check_projected_book(orders, dict(positions), marks, equity, fund.spec.risk)
     return LivePlan(
         session=session, cutoff=cutoff, decision=decision, marks=marks, equity=equity,

@@ -78,6 +78,7 @@ class CostModel(BaseModel):
 
     commission_bps: float = Field(default=0.0, ge=0, description="per-side cost of every fill, in bps of notional (commission + spread + impact)")
     borrow_bps_annual: float = Field(default=0.0, ge=0, description="annual fee on short notional, in bps")
+    min_trade_pct: float = Field(default=0.0, ge=0, lt=1, description="skip opening/adding trades smaller than this fraction of equity; not worth their cost")
 
 
 class FundSpec(BaseModel):

@@ -75,3 +75,19 @@ def test_check_projected_book_enforces_caps():
                  Order(ticker="C", side="buy", quantity=100, price=100.0)]
     with pytest.raises(ValueError, match="max_gross_exposure"):
         check_projected_book(too_gross, {"A": 100}, {**marks, "C": 100.0}, 100_000.0, limits)
+
+
+def test_min_trade_skips_small_opening_and_adding_trades():
+    from hedge_fund.brokers.models import Position
+    marks = {"A": 100.0, "B": 100.0, "C": 100.0}
+    held = {"B": Position(ticker="B", shares=10), "C": Position(ticker="C", shares=3)}
+    # A: new 0.2% position → skipped. B: +0.2% add → skipped. C: target 0 → closed anyway.
+    orders = build_orders({"A": 0.002, "B": 0.012}, held, marks, 100_000.0, min_trade_pct=0.005)
+    assert [(o.ticker, o.side, o.quantity) for o in orders] == [("C", "sell", 3)]
+
+
+def test_min_trade_never_blocks_reductions():
+    from hedge_fund.brokers.models import Position
+    held = {"A": Position(ticker="A", shares=110)}
+    orders = build_orders({"A": 0.10}, held, {"A": 100.0}, 100_000.0, min_trade_pct=0.005)
+    assert [(o.ticker, o.side, o.quantity) for o in orders] == [("A", "sell", 10)]

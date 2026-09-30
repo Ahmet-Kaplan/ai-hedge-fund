@@ -1,11 +1,14 @@
 # The Alpaca paper fund. All four library strategies, long/short, unlevered.
+# Every sleeve caps a name at 10% of the sleeve: since sleeves sum to the fund,
+# no name can breach the fund's 10% cap, so the risk stage never has to shrink
+# the whole book to fix one concentrated pick.
 # Run it with `aihf-paper` (see README "Paper trading on Alpaca").
 schema_version: 2
 name: paper-fund
 strategies:
   - name: fundamental-ls        # all five personas, dollar-neutral
     weight: 0.35
-    blend: {mode: dollar_neutral}
+    blend: {mode: dollar_neutral, max_name_weight: 0.10}
     models:
       - name: buffett
       - name: munger
@@ -14,7 +17,7 @@ strategies:
       - name: druckenmiller
   - name: deep-value            # Graham-led, long-only
     weight: 0.20
-    blend: {mode: long_only}
+    blend: {mode: long_only, max_name_weight: 0.10}
     models:
       - name: graham
         weight: 2.0
@@ -22,13 +25,13 @@ strategies:
       - name: munger
   - name: inflections           # fundamentals rate-of-change, long/short
     weight: 0.20
-    blend: {mode: long_short}
+    blend: {mode: long_short, max_name_weight: 0.10}
     models:
       - name: druckenmiller
       - name: lynch
   - name: earnings-drift        # PEAD held ~6 weeks with a fading view
     weight: 0.25
-    blend: {mode: long_short}
+    blend: {mode: long_short, max_name_weight: 0.10}
     models:
       - name: pead
         params: {signal_window_days: 45, decay: true}
@@ -38,6 +41,7 @@ risk:
 costs:
   commission_bps: 5             # per side, bps of notional
   borrow_bps_annual: 50         # general-collateral large-cap borrow
+  min_trade_pct: 0.005          # skip opening/adding trades under 0.5% of equity
 capital: 100000
 rebalance: weekly
 benchmark: SPY

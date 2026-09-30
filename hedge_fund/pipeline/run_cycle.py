@@ -151,7 +151,7 @@ def execute_decision(
     equity_before = cash_before + sum(p.shares * marks[t] for t, p in held.items())
     if not isfinite(equity_before) or equity_before <= 0:
         raise ValueError(f"{spec.name}: equity on {session} must be finite and positive")
-    orders = build_orders(targets, held, marks, equity_before)
+    orders = build_orders(targets, held, marks, equity_before, spec.costs.min_trade_pct)
     check_projected_book(orders, {t: p.shares for t, p in held.items()}, marks, equity_before, spec.risk)
     fills: list[Fill] = [broker.place_order(order) for order in orders]
     positions = {t: p.shares for t, p in broker.positions().items()}
