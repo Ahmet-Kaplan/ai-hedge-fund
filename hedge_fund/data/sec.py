@@ -30,6 +30,12 @@ _MIN_INTERVAL = 0.125                 # 8 requests/second, under SEC's 10
 _RETRY_DELAYS = (1.0, 2.0, 4.0)
 _FILING_FORMS = {"8-K", "8-K/A", "10-Q", "10-Q/A", "10-K", "10-K/A"}
 
+# Registrants whose history sits under an earlier CIK after a corporate
+# reorganization; their filings and facts are merged into the current one.
+PREDECESSORS: dict[str, list[str]] = {
+    "XOM": ["34088"],   # Exxon Mobil Corp → ExxonMobil Holdings Corp (2026 holding-company reorganization)
+}
+
 # Standard SIC divisions — the broad sector the agents see.
 _SIC_DIVISIONS = [
     (100, 999, "Agriculture, Forestry & Fishing"), (1000, 1499, "Mining"), (1500, 1799, "Construction"),
@@ -82,22 +88,21 @@ class SecSource:
             if cik is None:
                 raise DataSourceError(f"{ticker}: no SEC registrant with ticker {sec_ticker(ticker)}")
 
-        subs = self._get(SUBMISSIONS_URL.format(cik=cik))
+        sources = [*PREDECESSORS.get(ticker, []), cik]
+        filings: list[dict] = []
+        subs: dict = {}
+        for source in sources:
+            subs = self._get(SUBMISSIONS_URL.format(cik=source))
+            filings += _filings(subs)
         sic = int(subs["sic"]) if str(subs.get("sic") or "").isdigit() else None
         store.upsert_company(ticker, cik, subs.get("name"), sic, subs.get("sicDescription"))
-        recent = subs.get("filings", {}).get("recent", {})
-        filings = [
-            {"accn": accn, "form": form, "filed": filed, "report_date": report or None, "items": items or ""}
-            for accn, form, filed, report, items in zip(
-                recent.get("accessionNumber", []), recent.get("form", []), recent.get("filingDate", []),
-                recent.get("reportDate", []), recent.get("items", []))
-            if form in _FILING_FORMS
-        ]
         store.replace_filings(cik, filings)
         store.mark_synced(cik, submissions_at=now)
 
-        body = self._get(FACTS_URL.format(cik=cik))
-        store.replace_facts(cik, _facts(body))
+        facts: list[Fact] = []
+        for source in sources:
+            facts += _facts(self._get(FACTS_URL.format(cik=source)))
+        store.replace_facts(cik, facts)
         store.mark_synced(cik, facts_at=now)
         return cik
 
@@ -124,6 +129,17 @@ class SecSource:
                 raise DataSourceError(f"SEC {url}: HTTP {resp.status_code}: {resp.text[:200]}", status_code=resp.status_code)
             return resp.json()
         raise AssertionError("unreachable")
+
+
+def _filings(subs: dict) -> list[dict]:
+    recent = subs.get("filings", {}).get("recent", {})
+    return [
+        {"accn": accn, "form": form, "filed": filed, "report_date": report or None, "items": items or ""}
+        for accn, form, filed, report, items in zip(
+            recent.get("accessionNumber", []), recent.get("form", []), recent.get("filingDate", []),
+            recent.get("reportDate", []), recent.get("items", []))
+        if form in _FILING_FORMS
+    ]
 
 
 def _facts(body: dict) -> list[Fact]:

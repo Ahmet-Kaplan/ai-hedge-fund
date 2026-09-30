@@ -248,7 +248,8 @@ _SUE_MIN_HISTORY = 4
 _ANNOUNCEMENT_WINDOW = 60    # days after quarter end an 8-K item 2.02 may land
 
 
-def earnings_events(ticker: str, eps_facts: Iterable[Fact], filings: list[dict], limit: int) -> list[EarningsRecord]:
+def earnings_events(ticker: str, eps_facts: Iterable[Fact], filings: list[dict], limit: int,
+                    per_share: bool = True) -> list[EarningsRecord]:
     """Earnings surprises as standardized unexpected earnings (Bernard & Thomas 1989).
 
     SUE = (EPS this quarter − EPS same quarter last year) / stdev of the
@@ -258,6 +259,9 @@ def earnings_events(ticker: str, eps_facts: Iterable[Fact], filings: list[dict],
     EPS figure. EPS itself comes from the 10-Q/10-K XBRL, which can post a few
     days after the 8-K; the numbers are the ones the 8-K press release
     announced, so dating the event at the 8-K is not lookahead in substance.
+
+    `per_share=False` runs the same test on quarterly net income, for filers
+    that tag EPS only per share class (Berkshire, Visa); SUE is scale-free.
     """
     eps_facts = list(eps_facts)
     quarters = quarterly_values(eps_facts)
@@ -284,7 +288,8 @@ def earnings_events(ticker: str, eps_facts: Iterable[Fact], filings: list[dict],
         form, filed = _announcement(end, filings) or first_report[end]
         records.append(EarningsRecord(
             ticker=ticker, report_period=end, source_type=form, filing_date=filed,
-            quarterly=EarningsData(earnings_per_share=quarters[end], eps_surprise=surprise),
+            quarterly=EarningsData(earnings_per_share=quarters[end] if per_share else None,
+                                   net_income=None if per_share else quarters[end], eps_surprise=surprise),
         ))
     records.sort(key=lambda r: r.report_period, reverse=True)
     return records[:limit]

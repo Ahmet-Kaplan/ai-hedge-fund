@@ -176,3 +176,9 @@ def test_coverage_reports_history_and_a_lagging_sec_feed(tmp_path):
     assert row.warning == "SEC data feed has not published the 10-Q filed 2026-09-20 yet"
     [bad] = client(tmp_path, sec=FakeSec(fail=True)).coverage(["NOPE"], "2026-09-29")
     assert bad.error == "SEC unreachable"
+
+
+def test_benchmark_coverage_is_prices_only(tmp_path):
+    sec = FakeSec(fail=True)
+    [row] = client(tmp_path, sec=sec).coverage(["SPY"], "2026-09-29", prices_only={"SPY"})
+    assert row.error is None and row.price_last == "2026-08-03" and sec.calls == []

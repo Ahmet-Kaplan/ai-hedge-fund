@@ -163,15 +163,22 @@ class FreeDataClient:
 
     def get_earnings_history(self, ticker: str, limit: int = 12) -> list[EarningsRecord]:
         cik = self._cik(ticker, self._now().date().isoformat())
-        eps = self._store.facts(cik, ["EarningsPerShareDiluted"], filed_lte="9999-12-31")["EarningsPerShareDiluted"]
-        return earnings_events(ticker, eps, self._store.filings(cik, _FILING_FORMS), limit)
+        facts = self._store.facts(cik, ["EarningsPerShareDiluted", "NetIncomeLoss"], filed_lte="9999-12-31")
+        filings = self._store.filings(cik, _FILING_FORMS)
+        events = earnings_events(ticker, facts["EarningsPerShareDiluted"], filings, limit)
+        if not events:   # EPS tagged only per share class (Berkshire, Visa): use net income
+            events = earnings_events(ticker, facts["NetIncomeLoss"], filings, limit, per_share=False)
+        return events
 
     def get_market_cap(self, ticker: str, end_date: str) -> float | None:
         rows = self.get_financial_metrics(ticker, end_date, limit=1)
         return rows[0].market_cap if rows else None
 
-    def coverage(self, tickers: list[str], as_of: str) -> list[Coverage]:
-        """Sync every ticker and report what is available as of `as_of`."""
+    def coverage(self, tickers: list[str], as_of: str, prices_only: set[str] = frozenset()) -> list[Coverage]:
+        """Sync every ticker and report what is available as of `as_of`.
+
+        Tickers in `prices_only` (the benchmark ETF files no financials) skip SEC.
+        """
         self.prefetch_prices(tickers, as_of)
         out = []
         for ticker in tickers:
@@ -179,6 +186,9 @@ class FreeDataClient:
             bars = self._store.prices(ticker, PRICE_HISTORY_START, as_of)
             if bars:
                 row.price_first, row.price_last = bars[0].time[:10], bars[-1].time[:10]
+            if ticker in prices_only:
+                out.append(row)
+                continue
             try:
                 metrics = self.get_financial_metrics(ticker, as_of, limit=40)
                 row.periods = len(metrics)

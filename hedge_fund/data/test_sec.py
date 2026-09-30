@@ -121,3 +121,22 @@ def test_throttles_and_retries_rate_limits():
     sec, _, _ = source({"company_tickers": [FakeResponse(429, {}), FakeResponse(payload=TICKERS)]}, clock)
     assert sec.ticker_map()["BRK-B"] == "1067983"
     assert clock.sleeps and clock.sleeps[0] >= 1.0   # backed off after the 429
+
+
+def test_predecessor_registrant_history_is_merged(tmp_path, monkeypatch):
+    from hedge_fund.data import sec as sec_module
+    monkeypatch.setitem(sec_module.PREDECESSORS, "AAPL", ["999"])
+    old_facts = {"facts": {"us-gaap": {"NetIncomeLoss": {"units": {"USD": [
+        {"start": "2020-01-01", "end": "2020-03-31", "val": 7, "accn": "old1", "fy": 2020, "fp": "Q1", "form": "10-Q", "filed": "2020-05-01"}]}}}}}
+    old_subs = {"name": "Old Apple", "sic": "3571", "sicDescription": "x", "filings": {"recent": {
+        "accessionNumber": ["o1"], "filingDate": ["2020-04-30"], "reportDate": ["2020-04-30"], "form": ["8-K"], "items": ["2.02"]}}}
+    store = MarketStore(tmp_path / "m.db")
+    store.upsert_company("AAPL", "320193", "Apple Inc.", 3571, "Electronic Computers")
+    sec, _, _ = source({"submissions/CIK0000320193": [FakeResponse(payload=SUBMISSIONS)],
+                        "companyfacts/CIK0000320193": [FakeResponse(payload=FACTS)],
+                        "submissions/CIK0000000999": [FakeResponse(payload=old_subs)],
+                        "companyfacts/CIK0000000999": [FakeResponse(payload=old_facts)]})
+    sec.sync_company("AAPL", store, now="2026-09-30T10:00:00+00:00")
+    values = [f.value for f in store.facts("320193", ["NetIncomeLoss"], "2026-12-31")["NetIncomeLoss"]]
+    assert values == [7, 100]
+    assert [f["accn"] for f in store.filings("320193", ["8-K"])] == ["o1", "a1"]

@@ -250,3 +250,11 @@ def test_mis_scaled_diluted_share_count_is_not_trusted():
     facts["WeightedAverageNumberOfDilutedSharesOutstanding"] = [
         f("WeightedAverageNumberOfDilutedSharesOutstanding", "2026-04-01", "2026-06-30", 10e-6, "2026-08-01", unit="shares")]
     assert metrics_rows("TEST", facts, close_50, limit=1)[0].earnings_per_share == pytest.approx(86 / 10)
+
+
+def test_sue_on_net_income_when_eps_is_not_tagged():
+    from hedge_fund.data.fundamentals import earnings_events
+    income = [f("NetIncomeLoss", x.start, x.end, x.value * 1e9, x.filed) for x in eps_facts()]
+    events = earnings_events("TEST", income, FILINGS, limit=1, per_share=False)
+    assert events[0].quarterly.eps_surprise == "BEAT"
+    assert events[0].quarterly.earnings_per_share is None and events[0].quarterly.net_income == pytest.approx(2e9)
