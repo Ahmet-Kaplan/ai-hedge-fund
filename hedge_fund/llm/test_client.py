@@ -31,7 +31,7 @@ from hedge_fund.llm import (
     SUPPORTED_PROVIDERS,
 )
 from hedge_fund.llm.client import _flatten, JevLLM
-from hedge_fund.llm.registry import PROVIDER_ENV_VARS
+from hedge_fund.llm.registry import ALIAS_ENV_VARS, PROVIDER_ENV_VARS
 from hedge_fund.llm.test_contract import _response
 from hedge_fund.signals import ALPHA_MODEL_REGISTRY, BuffettAgent, LLMAgent, MungerAgent
 from hedge_fund.signals.test_llm_agents import (
@@ -78,7 +78,8 @@ def test_missing_key_names_the_variable(monkeypatch):
     monkeypatch.delenv("HEDGE_FUND_LLM_MODEL", raising=False)
     for env_var in PROVIDER_ENV_VARS.values():
         monkeypatch.delenv(env_var, raising=False)
-    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+    for env_var in ALIAS_ENV_VARS.values():
+        monkeypatch.delenv(env_var, raising=False)
     with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
         make_llm("claude-opus-5")
 
@@ -88,6 +89,25 @@ def test_unlisted_model_falls_back_to_anthropic(keyed):
     code change first."""
     llm = make_llm("claude-something-unreleased")
     assert llm.model == "claude-something-unreleased"
+
+
+def test_anthropic_accepts_aihf_key(monkeypatch):
+    """AIHF_ANTHROPIC_API_KEY is read first, so it wins over a stray
+    ANTHROPIC_API_KEY, and alone is enough."""
+    import langchain_anthropic
+    chat = Mock()
+    monkeypatch.setattr(langchain_anthropic, "ChatAnthropic", chat)
+    monkeypatch.delenv("HEDGE_FUND_LLM_MODEL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("AIHF_ANTHROPIC_API_KEY", "aihf-test-key-not-real")
+    assert make_llm("claude-opus-5-5").model == "claude-opus-5-5"
+    assert chat.call_args.kwargs["api_key"] == "aihf-test-key-not-real"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "other-test-key-not-real")
+    make_llm("claude-opus-5-5")
+    assert chat.call_args.kwargs["api_key"] == "aihf-test-key-not-real"
+    monkeypatch.delenv("AIHF_ANTHROPIC_API_KEY")
+    make_llm("claude-opus-5-5")
+    assert chat.call_args.kwargs["api_key"] == "other-test-key-not-real"
 
 
 def test_kimi_accepts_moonshot_key(monkeypatch):
@@ -209,7 +229,7 @@ API_KEY = "test-typesafe-secret-key"
 
 @pytest.mark.parametrize("use_environment", [False, True])
 def test_factory_routes_jev_with_only_its_key(use_environment, monkeypatch, http):
-    for variable in (*PROVIDER_ENV_VARS.values(), "MOONSHOT_API_KEY", "HEDGE_FUND_LLM_MODEL"):
+    for variable in (*PROVIDER_ENV_VARS.values(), *ALIAS_ENV_VARS.values(), "HEDGE_FUND_LLM_MODEL"):
         monkeypatch.delenv(variable, raising=False)
     monkeypatch.setenv("TYPESAFE_API_KEY", API_KEY)
     # If routing regresses, fail at chat construction rather than making a call.
@@ -259,7 +279,7 @@ def test_cli_jev_cycle_and_saved_replay(tmp_path, monkeypatch, http, capsys):
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(keys, "ENV_PATH", tmp_path / "saved.env")
-    for variable in (*PROVIDER_ENV_VARS.values(), "MOONSHOT_API_KEY"):
+    for variable in (*PROVIDER_ENV_VARS.values(), *ALIAS_ENV_VARS.values()):
         monkeypatch.delenv(variable, raising=False)
     monkeypatch.setenv("TYPESAFE_API_KEY", API_KEY)
     monkeypatch.setenv("HEDGE_FUND_LLM_MODEL", "claude-opus-5")

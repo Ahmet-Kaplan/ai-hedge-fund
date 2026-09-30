@@ -27,6 +27,12 @@ PROVIDER_ENV_VARS = {
     "TypeSafe": "TYPESAFE_API_KEY",
 }
 
+# A second variable some providers' key is read from, checked first.
+ALIAS_ENV_VARS = {
+    "Kimi": "MOONSHOT_API_KEY",
+    "Anthropic": "AIHF_ANTHROPIC_API_KEY",
+}
+
 # Providers v2 has a client for (see client.py:make_llm). Anything in the
 # registry but missing here is shown in the picker and not selectable — better
 # a greyed row than a run that dies on an id the transport rejects.

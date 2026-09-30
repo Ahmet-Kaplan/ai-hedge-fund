@@ -229,6 +229,14 @@ def test_missing_env_accepts_moonshot_alias(monkeypatch):
     assert missing_env(["KIMI_API_KEY"]) == []
 
 
+def test_missing_env_accepts_aihf_anthropic_alias(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("AIHF_ANTHROPIC_API_KEY", raising=False)
+    assert missing_env(["ANTHROPIC_API_KEY"]) == ["ANTHROPIC_API_KEY"]
+    monkeypatch.setenv("AIHF_ANTHROPIC_API_KEY", "x")
+    assert missing_env(["ANTHROPIC_API_KEY"]) == []
+
+
 def test_cli_stops_cleanly_without_data_key(monkeypatch, capsys):
     monkeypatch.delenv("HEDGE_FUND_DATA_PROVIDER", raising=False)
     monkeypatch.delenv("HEDGE_FUND_DATA_SUPPLEMENT", raising=False)
@@ -246,6 +254,7 @@ def test_cli_preflight_reports_llm_key(monkeypatch, capsys):
     monkeypatch.setenv("TIINGO_API_KEY", "x")
     monkeypatch.setenv("SEC_USER_AGENT", "Test test@example.com")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("AIHF_ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("HEDGE_FUND_LLM_MODEL", raising=False)
     assert cli.main(["--preflight"]) == 2
     assert "ANTHROPIC_API_KEY: MISSING" in capsys.readouterr().err

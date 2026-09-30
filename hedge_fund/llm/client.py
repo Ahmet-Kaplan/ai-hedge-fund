@@ -27,6 +27,7 @@ import requests
 
 from hedge_fund.llm import contract
 from hedge_fund.llm.registry import (
+    ALIAS_ENV_VARS,
     env_var_for,
     is_supported,
     provider_for,
@@ -321,7 +322,9 @@ def _require_key(provider: str) -> str:
     """The provider's API key, or a failure that names the variable to set."""
     env_var = env_var_for(provider)
     # Kimi accepts either name; v1 reads MOONSHOT_API_KEY first.
-    key = (os.getenv("MOONSHOT_API_KEY") if provider == "Kimi" else None)
+    # Anthropic likewise reads AIHF_ANTHROPIC_API_KEY first, so this app's key
+    # can live beside another tool's ANTHROPIC_API_KEY.
+    key = (os.getenv(ALIAS_ENV_VARS[provider]) if provider in ALIAS_ENV_VARS else None)
     key = key or (os.getenv(env_var) if env_var else None)
     if not key:
         raise ValueError(

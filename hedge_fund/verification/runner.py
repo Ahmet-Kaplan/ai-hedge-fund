@@ -19,7 +19,7 @@ from typing import Callable
 
 from hedge_fund.data.factory import required_data_env
 from hedge_fund.features.snapshot import MIN_PERIODS
-from hedge_fund.llm.registry import env_var_for, provider_for
+from hedge_fund.llm.registry import ALIAS_ENV_VARS, env_var_for, provider_for
 from hedge_fund.verification.checks import (
     CheckResult,
     aggregate,
@@ -67,7 +67,8 @@ def required_env(model: str | None = None) -> list[str]:
     the data provider's (make_data_client) then the LLM's.
 
     Mirrors make_llm's routing: unlisted model ids use the Anthropic
-    transport. Kimi also accepts MOONSHOT_API_KEY (checked by missing_env).
+    transport. Kimi also accepts MOONSHOT_API_KEY and Anthropic
+    AIHF_ANTHROPIC_API_KEY (checked by missing_env).
     """
     model = model or os.environ.get("HEDGE_FUND_LLM_MODEL") or "claude-opus-5-5"
     provider = provider_for(model) or "Anthropic"
@@ -78,7 +79,8 @@ def missing_env(names: list[str]) -> list[str]:
     """Which of *names* are unset or empty in the process environment."""
     missing = []
     for name in names:
-        value = os.environ.get(name) or (os.environ.get("MOONSHOT_API_KEY") if name == "KIMI_API_KEY" else None)
+        alias = {env_var_for(p): a for p, a in ALIAS_ENV_VARS.items()}.get(name)
+        value = os.environ.get(name) or (os.environ.get(alias) if alias else None)
         if not value:
             missing.append(name)
     return missing
