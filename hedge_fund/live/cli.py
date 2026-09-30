@@ -147,6 +147,10 @@ def _status(args, spec: FundSpec, ledger: Ledger) -> int:
     halted = ledger.halted_path.read_text().strip() if ledger.is_halted() else "no"
     print(f"fund {spec.name} · account {account.status} · equity ${account.equity:,.2f} · cash ${account.cash:,.2f}")
     print(f"positions {len(positions)} ({sum(s < 0 for s in positions.values())} short)")
+    fractions = client.fractional_holdings()
+    if fractions:
+        print(f"WARNING fractional holdings the fund ignores (close them in Alpaca): "
+              f"{', '.join(f'{t} {q:g}' for t, q in sorted(fractions.items()))}")
     print(f"kill switch {'ON' if KILL_PATH.exists() else 'off'} · halted: {halted}")
     print(f"last reconciled: {rows[-1].date} ${rows[-1].equity:,.2f}" if rows else "last reconciled: never")
     print(f"schedule {'installed' if schedule_installed() else 'not installed'} "

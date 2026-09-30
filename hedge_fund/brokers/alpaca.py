@@ -81,13 +81,28 @@ class AlpacaPaperClient:
                        last_equity=float(row["last_equity"]), status=row["status"])
 
     def positions(self) -> dict[str, int]:
-        """Signed whole shares per ticker. Negative = short."""
+        """Signed whole shares per ticker. Negative = short.
+
+        The fund trades whole shares (market-on-close orders cannot be
+        fractional), so any fractional remainder is left out here and
+        reported by fractional_holdings() instead.
+        """
         held: dict[str, int] = {}
         for row in self._request("GET", "/v2/positions"):
-            shares = abs(int(float(row["qty"])))
+            shares = int(abs(float(row["qty"])))
             if shares:
                 held[row["symbol"]] = -shares if row.get("side") == "short" else shares
         return held
+
+    def fractional_holdings(self) -> dict[str, float]:
+        """Signed fractional-share remainders the fund cannot trade or value (e.g. from manual trades)."""
+        fractions: dict[str, float] = {}
+        for row in self._request("GET", "/v2/positions"):
+            qty = abs(float(row["qty"]))
+            remainder = qty - int(qty)
+            if remainder > 1e-9:
+                fractions[row["symbol"]] = -remainder if row.get("side") == "short" else remainder
+        return fractions
 
     def calendar(self, start: str, end: str) -> list[str]:
         """Trading-session dates (YYYY-MM-DD) in [start, end]."""

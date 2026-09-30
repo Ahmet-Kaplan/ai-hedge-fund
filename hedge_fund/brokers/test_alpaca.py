@@ -102,3 +102,14 @@ def test_list_orders_maps_fills():
     [order] = client.list_orders(after="2024-06-10T00:00:00-04:00")
     assert (order.filled_qty, order.filled_avg_price, order.side) == (5, 101.25, "sell")
     assert session.calls[0]["params"]["status"] == "all"
+
+
+def test_fractional_holdings_are_reported_not_hidden():
+    rows = [
+        {"symbol": "AAPL", "qty": "10.25", "side": "long", "market_value": "2050.5"},
+        {"symbol": "SPY", "qty": "0.02", "side": "long", "market_value": "15.3"},
+        {"symbol": "MSFT", "qty": "5", "side": "long", "market_value": "2000"},
+    ]
+    client, _ = _client(FakeResponse(payload=rows), FakeResponse(payload=rows))
+    assert client.positions() == {"AAPL": 10, "MSFT": 5}
+    assert client.fractional_holdings() == pytest.approx({"AAPL": 0.25, "SPY": 0.02})
