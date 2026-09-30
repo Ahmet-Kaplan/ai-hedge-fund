@@ -59,6 +59,7 @@ class FundBacktestMetrics(BaseModel):
     n_cycles: int
     n_orders: int
     n_pending: int = 0
+    total_costs: float = 0.0          # commission + borrow charged, dollars
 
 
 class FundBacktestResult(BaseModel):
@@ -97,7 +98,7 @@ def backtest_fund(
     universe = normalize_universe(universe)
     schedule = build_schedule(data_client, spec.benchmark, start, end, spec.rebalance)
     dates = list(schedule.closes)
-    broker = SimBroker(cash=spec.capital)
+    broker = SimBroker(cash=spec.capital, commission_bps=spec.costs.commission_bps)
     records: list[CycleRecord] = []
     pending: list[PendingRunResult] = []
     due: dict[str, DecisionRecord] = {}
@@ -105,6 +106,12 @@ def backtest_fund(
     benchmark_nav: list[float] = []
     n_cycles = sum(day is not None for day in schedule.execution_dates.values())
     for i, session in enumerate(dates):
+        if i > 0 and spec.costs.borrow_bps_annual > 0:
+            # Shorts held since the previous close pay borrow for the calendar days in between.
+            shorts = [t for t, p in broker.positions().items() if p.shares < 0]
+            if shorts:
+                days = (_date.fromisoformat(session) - _date.fromisoformat(dates[i - 1])).days
+                broker.accrue_borrow(exact_marks(shorts, session, data_client), days, spec.costs.borrow_bps_annual)
         if session in due:
             record = execute_decision(fund, due.pop(session), session, broker, data_client)
             records.append(record)
@@ -132,7 +139,7 @@ def backtest_fund(
         fund=spec.name, start=dates[0], end=dates[-1], rebalance=spec.rebalance,
         benchmark=spec.benchmark, universe=universe, capital=spec.capital,
         dates=dates, nav=nav, benchmark_nav=benchmark_nav,
-        metrics=performance_metrics(spec.capital, dates, nav, benchmark_nav, records, len(pending)),
+        metrics=performance_metrics(spec.capital, dates, nav, benchmark_nav, records, len(pending), broker.costs()),
         records=records, pending=pending,
     )
 
@@ -167,6 +174,7 @@ def performance_metrics(
     benchmark_nav: list[float],
     records: list[CycleRecord],
     n_pending: int = 0,
+    total_costs: float = 0.0,
 ) -> FundBacktestMetrics:
     """Closing-value performance over the full window, with daily-return Sharpe."""
     total = nav[-1] / capital - 1
@@ -203,4 +211,5 @@ def performance_metrics(
         n_cycles=len(records),
         n_pending=n_pending,
         n_orders=sum(len(r.orders) for r in records),
+        total_costs=round(total_costs, 2),
     )

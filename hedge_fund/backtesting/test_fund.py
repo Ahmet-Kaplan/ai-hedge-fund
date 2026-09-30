@@ -292,3 +292,26 @@ def test_daily_replay_executes_before_creating_next_assessment():
     assert events == [("valuation", "2024-06-03"), ("assessment", "2024-06-03"),
                       ("execution", "2024-06-04"), ("valuation", "2024-06-04"),
                       ("assessment", "2024-06-04")]
+
+
+def test_commission_reduces_nav_from_the_execution_close():
+    spec = _spec(costs={"commission_bps": 10})
+    fund = Fund(spec, models={"solo": [FakeAnalyst("a", views={"AAPL": 1.0})]})
+    result = backtest_fund(fund, "2024-06-03", "2024-06-14", FakeDataClient(SERIES), ["AAPL"])
+    # Buy 500 @ 200 on Mon 06-10 costs 10 bps of $100k = $100.
+    assert result.nav == [100_000.0] * 5 + [99_900.0] * 4 + [104_900.0]
+    assert result.metrics.total_costs == pytest.approx(100.0)
+
+
+def test_borrow_accrues_daily_on_short_book():
+    spec = _spec(costs={"borrow_bps_annual": 365})  # 1 bp per calendar day
+    fund = Fund(spec, models={"solo": [FakeAnalyst("a", views={"AAPL": -1.0})]})
+    result = backtest_fund(fund, "2024-06-03", "2024-06-14", FakeDataClient(SERIES), ["AAPL"])
+    # Short 500 opened at Mon 06-10 close; charged Tue–Thu on $100k (3 × $10)
+    # and Fri on $105k ($10.50).
+    assert result.metrics.total_costs == pytest.approx(40.5)
+    assert result.nav[-1] == pytest.approx(200_000.0 - 40.5 - 105_000.0)
+
+
+def test_costs_default_to_zero():
+    assert _run().metrics.total_costs == 0.0

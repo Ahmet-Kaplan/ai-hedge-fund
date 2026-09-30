@@ -69,6 +69,16 @@ class StrategySpec(BaseModel):
         return {m.name: m.weight for m in self.models}
 
 
+class CostModel(BaseModel):
+    """Trading frictions the backtester charges. Zero by default, so existing
+    mandates replay exactly as before; the paper mandate sets real numbers."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    commission_bps: float = Field(default=0.0, ge=0, description="per-side cost of every fill, in bps of notional (commission + spread + impact)")
+    borrow_bps_annual: float = Field(default=0.0, ge=0, description="annual fee on short notional, in bps")
+
+
 class FundSpec(BaseModel):
     """A mandate with fund-level risk limits and no fixed ticker universe.
 
@@ -91,6 +101,7 @@ class FundSpec(BaseModel):
         default="SPY",
         description="what the fund measures itself against; also the source " "of the backtest's trading-day grid",
     )
+    costs: CostModel = Field(default_factory=CostModel, description="frictions charged by the backtester")
 
     @field_validator("benchmark")
     @classmethod

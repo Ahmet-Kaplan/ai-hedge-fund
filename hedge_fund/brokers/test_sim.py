@@ -57,3 +57,28 @@ def test_positions_returns_a_copy():
     broker.place_order(Order(ticker="AAPL", side="buy", quantity=5, price=100.0))
     broker.positions().clear()
     assert broker.positions()["AAPL"].shares == 5
+
+
+def test_commission_charged_on_every_fill():
+    broker = SimBroker(cash=10_000.0, commission_bps=10)
+    broker.place_order(Order(ticker="AAPL", side="buy", quantity=10, price=100.0))
+    assert broker.cash() == pytest.approx(10_000.0 - 1_000.0 - 1.0)
+    broker.place_order(Order(ticker="AAPL", side="sell", quantity=10, price=100.0))
+    assert broker.cash() == pytest.approx(10_000.0 - 2.0)
+    assert broker.costs() == pytest.approx(2.0)
+
+
+def test_default_is_cost_free():
+    broker = SimBroker(cash=10_000.0)
+    broker.place_order(Order(ticker="AAPL", side="buy", quantity=10, price=100.0))
+    assert broker.costs() == 0.0
+
+
+def test_borrow_accrues_on_shorts_only():
+    broker = SimBroker(cash=0.0)
+    broker.place_order(Order(ticker="AAPL", side="sell", quantity=10, price=100.0))
+    broker.place_order(Order(ticker="MSFT", side="buy", quantity=10, price=100.0))
+    fee = broker.accrue_borrow({"AAPL": 100.0, "MSFT": 100.0}, days=365, borrow_bps_annual=100)
+    assert fee == pytest.approx(10.0)          # 1% of $1,000 short notional
+    assert broker.cash() == pytest.approx(-10.0)
+    assert broker.costs() == pytest.approx(10.0)

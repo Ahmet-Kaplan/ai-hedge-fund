@@ -2,6 +2,7 @@
 
 from hedge_fund.fund.spec import (
     BlendPolicy,
+    CostModel,
     custom_strategy,
     Fund,
     FundSpec,
@@ -16,6 +17,7 @@ from hedge_fund.fund.storage import discover_funds, SavedFund
 
 __all__ = [
     "BlendPolicy",
+    "CostModel",
     "Fund",
     "FundSpec",
     "ModelSpec",
