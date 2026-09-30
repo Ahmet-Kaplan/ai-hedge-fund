@@ -56,15 +56,9 @@ def test_as_of_passes_through_to_data_client():
 
 
 def test_insufficient_data_raises():
-    client = MockDataClient(metrics=_history(2))  # below MIN_PERIODS
+    client = MockDataClient(metrics=_history(3))  # below MIN_PERIODS
     with pytest.raises(InsufficientData):
         build_snapshot("TEST", "2025-01-15", client)
-
-
-def test_three_filed_periods_are_enough():
-    # Each row is already a trailing-twelve-month figure; three of them show
-    # a year of numbers plus two quarters of change.
-    assert len(build_snapshot("TEST", "2025-01-15", MockDataClient(metrics=_history(3))).periods) == 3
 
 
 def test_aggregates():

@@ -22,11 +22,10 @@ from pydantic import BaseModel
 from hedge_fund.data.protocol import DataClient
 
 # An agent can't say anything defensible about a company with less history
-# than this. Each row is a trailing-twelve-month figure, so three rows are a
-# full year of numbers plus two quarters of change. (Four would be a full
-# year of change, but Financial Datasets currently serves only 3-4 filed
-# quarters for many large caps — AAPL, KO, COST — and four left them unseen.)
-MIN_PERIODS = 3
+# than this (one year of ttm rows). The free SEC source serves ~10 years; if
+# HEDGE_FUND_DATA=fd, note that Financial Datasets has served only 3-4 filed
+# quarters for many large caps, so those would be abstained on.
+MIN_PERIODS = 4
 
 
 class InsufficientData(ValueError):
