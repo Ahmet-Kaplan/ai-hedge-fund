@@ -26,6 +26,12 @@ class _FakeResponse:
         return self._payload
 
 
+@pytest.fixture(autouse=True)
+def _opt_in(monkeypatch):
+    """Mocked HTTP only: the project policy is opted in for these tests."""
+    monkeypatch.setenv("AIHF_ALLOW_FINANCIAL_DATASETS", "1")
+
+
 @pytest.fixture
 def client():
     c = FDClient(api_key="test-key")

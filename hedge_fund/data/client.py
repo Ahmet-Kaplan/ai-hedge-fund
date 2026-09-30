@@ -8,6 +8,7 @@ import time
 
 import requests
 
+from hedge_fund.data.policy import require_financial_datasets
 from hedge_fund.data.models import (
     CompanyFacts,
     CompanyNews,
@@ -50,6 +51,8 @@ class FDClient:
         api_key: str | None = None,
         timeout: float = 30.0,
     ) -> None:
+        # Fail closed before touching the key or opening a session.
+        require_financial_datasets("FDClient")
         self._api_key = api_key or os.environ.get("FINANCIAL_DATASETS_API_KEY", "")
         self._timeout = timeout
         self._session = requests.Session()
@@ -267,6 +270,8 @@ class FDClient:
         *path* may be an absolute URL (a ``next_page_url`` from a previous
         response), which is requested verbatim.
         """
+        # Re-checked per request: the policy may be switched off after construction.
+        require_financial_datasets(f"{method} {path}")
         url = path if path.startswith("http") else self.BASE_URL + path
         for attempt, delay in enumerate((*self._RETRY_DELAYS, None)):
             try:

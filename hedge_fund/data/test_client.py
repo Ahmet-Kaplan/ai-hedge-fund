@@ -10,8 +10,8 @@ PRICE_START = "2024-01-01"
 PRICE_END = "2026-04-15"
 
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("FINANCIAL_DATASETS_API_KEY"),
-    reason="live Financial Datasets smoke tests require FINANCIAL_DATASETS_API_KEY",
+    not (os.environ.get("FINANCIAL_DATASETS_API_KEY") and os.environ.get("AIHF_ALLOW_FINANCIAL_DATASETS") == "1"),
+    reason="live Financial Datasets smoke tests require FINANCIAL_DATASETS_API_KEY and AIHF_ALLOW_FINANCIAL_DATASETS=1",
 )
 
 

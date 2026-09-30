@@ -188,8 +188,8 @@ class TestMetrics:
 # ---------------------------------------------------------------------------
 
 pytestmark_live = pytest.mark.skipif(
-    not os.environ.get("FINANCIAL_DATASETS_API_KEY"),
-    reason="live tests require FINANCIAL_DATASETS_API_KEY",
+    not (os.environ.get("FINANCIAL_DATASETS_API_KEY") and os.environ.get("AIHF_ALLOW_FINANCIAL_DATASETS") == "1"),
+    reason="live tests require FINANCIAL_DATASETS_API_KEY and AIHF_ALLOW_FINANCIAL_DATASETS=1",
 )
 
 

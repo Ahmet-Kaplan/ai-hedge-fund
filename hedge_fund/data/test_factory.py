@@ -64,6 +64,7 @@ def test_financial_datasets_only_when_selected(monkeypatch):
     from hedge_fund.data.client import FDClient
     monkeypatch.setenv("HEDGE_FUND_DATA_PROVIDER", "financial-datasets")
     assert required_data_env() == ["FINANCIAL_DATASETS_API_KEY"]
+    monkeypatch.setenv("AIHF_ALLOW_FINANCIAL_DATASETS", "1")   # explicit opt-in (no request is made)
     with make_data_client() as client:
         assert isinstance(client._raw, FDClient) and hasattr(client, "get_prices")
     monkeypatch.setenv("HEDGE_FUND_DATA_PROVIDER", "yahoo")
@@ -74,6 +75,7 @@ def test_financial_datasets_only_when_selected(monkeypatch):
 def test_supplement_is_opt_in(monkeypatch):
     monkeypatch.setenv("HEDGE_FUND_DATA_SUPPLEMENT", "financial-datasets")
     assert required_data_env() == ["TIINGO_API_KEY", "SEC_USER_AGENT", "FINANCIAL_DATASETS_API_KEY"]
+    monkeypatch.setenv("AIHF_ALLOW_FINANCIAL_DATASETS", "1")   # explicit opt-in (no request is made)
     with make_data_client() as client:
         assert client.supplemental is not None
     monkeypatch.setenv("HEDGE_FUND_DATA_SUPPLEMENT", "other")

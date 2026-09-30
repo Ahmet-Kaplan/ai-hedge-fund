@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 
 from hedge_fund.data.edgar import USER_AGENT_ENV, EdgarClient
+from hedge_fund.data.policy import require_financial_datasets
 from hedge_fund.data.security_events import security_event
 from hedge_fund.data.tiingo import API_KEY_ENV as TIINGO_KEY_ENV
 from hedge_fund.data.tiingo import TiingoClient
@@ -170,6 +171,7 @@ def make_data_client(provider: str | None = None, **kwargs):
     """
     name = data_provider(provider)
     if name == FINANCIAL_DATASETS:
+        require_financial_datasets(f"{PROVIDER_ENV}={FINANCIAL_DATASETS}")
         from hedge_fund.data.client import FDClient
         return _ClosingCache(FDClient())
     tiingo = kwargs.pop("tiingo", None) or TiingoClient()
@@ -178,6 +180,7 @@ def make_data_client(provider: str | None = None, **kwargs):
         raise TypeError(f"unexpected arguments: {sorted(kwargs)}")
     supplemental = None
     if _supplement() == FINANCIAL_DATASETS:
+        require_financial_datasets(f"{SUPPLEMENT_ENV}={FINANCIAL_DATASETS}")
         from hedge_fund.data.client import FDClient
         supplemental = _ClosingCache(FDClient())
     return CompositeDataClient(tiingo, edgar, supplemental)
