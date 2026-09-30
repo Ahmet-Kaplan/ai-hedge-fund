@@ -250,3 +250,23 @@ Sharpe but its edge is not statistically distinguishable from zero and it trails
 equal-weight; not adopted. Inverse-vol sizing trims drawdowns at a return cost.
 No variant beats equal-weighting the largest 100 by a reliable margin — the bar
 the LLM agents must clear.
+
+## 12. First LLM baseline on free data (2026-09-30)
+
+Paper mandate, 2026-07-01 → 2026-09-29 (after the default model's training
+cutoff), blinded prompts, 32-name universe, costs on. ~300 LLM calls (weekly
+prompts repeat until a new filing arrives, so the prompt cache absorbs most).
+
+| Variant | 3-month | Annualized | Sharpe | Max DD | Beats both |
+|---|---|---|---|---|---|
+| Fund | +3.1% | +13.1% | 1.67 | 1.6% | yes |
+| Deep Value only | +7.5% | +34.1% | 2.33 | 2.7% | yes |
+| Fundamental L/S only | +2.6% | +11.2% | 1.72 | 1.8% | no |
+| Inflections only | +2.7% | +11.3% | 1.18 | 2.9% | no |
+| Earnings Drift only | −0.6% | −2.3% | −0.19 | 2.9% | no |
+| SPY | +2.7% | +11.5% | 1.04 | 3.4% | — |
+| Equal-weight (32) | +0.4% | +1.7% | 0.24 | 2.8% | — |
+
+13 weeks cannot separate skill from luck; this is the reference the paper
+account is measured against. Earnings Drift is the first candidate for a slice
+cut at the 12-rebalance review.
