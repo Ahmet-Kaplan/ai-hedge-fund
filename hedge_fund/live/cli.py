@@ -7,6 +7,7 @@
     aihf-paper baseline [--start D] [--end D]
     aihf-paper flatten --yes           halt and close every position at today's close
     aihf-paper resume                  clear a halt
+    aihf-paper data-sync               download prices + SEC data, report coverage
     aihf-paper install-schedule | uninstall-schedule
 
 Paper only: the Alpaca client refuses any endpoint but paper-api.alpaca.markets.
@@ -23,7 +24,7 @@ from pathlib import Path
 
 from hedge_fund.backtesting.fund import FundBacktestResult
 from hedge_fund.brokers.alpaca import AlpacaPaperClient
-from hedge_fund.data import open_data_client
+from hedge_fund.data import FreeDataClient, open_data_client
 from hedge_fund.data.sessions import NEW_YORK, completed_through
 from hedge_fund.fund import Fund, FundSpec, load_spec, normalize_universe
 from hedge_fund.live.baseline import POST_CUTOFF_START, run_baseline
@@ -75,6 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--start", default=POST_CUTOFF_START)
     p.add_argument("--end", default=completed_through())
     p.add_argument("--out", help="where to write the JSON (default: the ledger's baseline/ dir)")
+    command("data-sync", "download prices and SEC data for the universe; report coverage")
     command("install-schedule", "install the launchd jobs")
     command("uninstall-schedule", "remove the launchd jobs")
     return parser
@@ -193,6 +195,28 @@ def _baseline(args, spec: FundSpec, ledger: Ledger) -> int:
     return 0
 
 
+def _data_sync(args, spec: FundSpec, ledger: Ledger) -> int:
+    tickers = sorted(set(load_universe(args.universe)) | {spec.benchmark})
+    with open_data_client() as data:
+        if not isinstance(data, FreeDataClient):
+            print("data-sync applies to the free data source (HEDGE_FUND_DATA=free)")
+            return 2
+        rows = data.coverage(tickers, completed_through())
+    print(f"{'ticker':7} {'prices':23} {'fundamental periods':>20} {'latest':>11} {'earnings':>9}")
+    for r in rows:
+        if r.error:
+            print(f"{r.ticker:7} ERROR {r.error}")
+            continue
+        prices = f"{r.price_first} → {r.price_last}" if r.price_first else "none"
+        print(f"{r.ticker:7} {prices:23} {r.periods:>20} {r.latest_period or '-':>11} {r.earnings_events:>9}")
+        if r.warning:
+            print(f"        note: {r.warning}")
+    thin = [r.ticker for r in rows if not r.error and r.ticker != spec.benchmark and r.periods < 4]
+    if thin:
+        print(f"fewer than 4 fundamental periods (agents will abstain): {', '.join(thin)}")
+    return 0
+
+
 def _install(args, spec: FundSpec, ledger: Ledger) -> int:
     paths = install_schedule(mandate=Path(args.mandate).resolve(), universe=Path(args.universe).resolve(),
                              log_dir=ledger.root / "logs")
@@ -211,7 +235,7 @@ def _uninstall(args, spec: FundSpec, ledger: Ledger) -> int:
 _COMMANDS = {
     "submit": _submit, "reconcile": _reconcile, "report": _report, "status": _status,
     "flatten": _flatten, "resume": _resume, "baseline": _baseline,
-    "install-schedule": _install, "uninstall-schedule": _uninstall,
+    "data-sync": _data_sync, "install-schedule": _install, "uninstall-schedule": _uninstall,
 }
 
 

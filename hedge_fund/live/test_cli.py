@@ -31,3 +31,33 @@ def test_parser_defaults():
     args = build_parser().parse_args(["submit", "--dry-run"])
     assert args.command == "submit" and args.dry_run is True
     assert args.mandate == str(DEFAULT_MANDATE)
+
+
+def test_data_sync_prints_coverage(monkeypatch, capsys, tmp_path):
+    from contextlib import contextmanager
+
+    from hedge_fund.data.free import Coverage, FreeDataClient
+    from hedge_fund.live import cli
+
+    class Fake(FreeDataClient):
+        def __init__(self):
+            pass
+
+        def coverage(self, tickers, as_of):
+            return [Coverage("AAPL", "2016-01-04", "2026-09-29", 12, "2026-06-27", 8),
+                    Coverage("XOM", "2016-01-04", "2026-09-29", 1, "2026-06-30", 0, warning="lagging"),
+                    Coverage("SPY", "2016-01-04", "2026-09-29")]
+
+    @contextmanager
+    def fake_open():
+        yield Fake()
+
+    universe = tmp_path / "u.list"
+    universe.write_text("AAPL XOM\n")
+    monkeypatch.setattr(cli, "open_data_client", fake_open)
+    monkeypatch.setattr(cli, "apply_credentials", lambda: None)
+    monkeypatch.setattr(cli.Ledger, "for_fund", classmethod(lambda cls, name: cli.Ledger(tmp_path / "ledger")))
+    assert cli.main(["data-sync", "--universe", str(universe)]) == 0
+    out = capsys.readouterr().out
+    assert "AAPL" in out and "note: lagging" in out
+    assert "agents will abstain): XOM" in out

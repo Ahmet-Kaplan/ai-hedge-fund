@@ -160,3 +160,19 @@ def test_unchanged_history_only_fetches_the_tail(tmp_path):
     prices.closes["TEST"]["2026-08-04"] = 52.0
     c.get_prices("TEST", "2026-07-31", "2026-08-04")
     assert prices.calls[-1] == (("TEST",), "2026-08-03", "2026-08-04")   # overlaps one stored day to check it
+
+
+def test_coverage_reports_history_and_a_lagging_sec_feed(tmp_path):
+    class LaggingSec(FakeSec):
+        def sync_company(self, ticker, store, *, now):
+            cik = super().sync_company(ticker, store, now=now)
+            store.replace_filings(cik, [{"accn": "late", "form": "10-Q", "filed": "2026-09-20",
+                                         "report_date": "2026-09-15", "items": ""}])
+            return cik
+    c = client(tmp_path, sec=LaggingSec())
+    [row] = c.coverage(["TEST"], "2026-09-29")
+    assert (row.ticker, row.price_first, row.price_last) == ("TEST", "2026-06-30", "2026-08-03")
+    assert row.periods == 5 and row.latest_period == "2026-06-30"
+    assert row.warning == "SEC data feed has not published the 10-Q filed 2026-09-20 yet"
+    [bad] = client(tmp_path, sec=FakeSec(fail=True)).coverage(["NOPE"], "2026-09-29")
+    assert bad.error == "SEC unreachable"

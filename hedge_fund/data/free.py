@@ -17,6 +17,7 @@ EDGAR; both are fetched into MarketStore once and read locally after:
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
@@ -33,6 +34,20 @@ logger = logging.getLogger(__name__)
 PRICE_HISTORY_START = "2016-01-01"   # Alpaca's consolidated daily history begins here
 SEC_STALE_AFTER = timedelta(hours=20)
 _FILING_FORMS = ["8-K", "8-K/A", "10-Q", "10-Q/A", "10-K", "10-K/A"]
+
+
+@dataclass
+class Coverage:
+    """What the local database holds for one ticker (see `aihf-paper data-sync`)."""
+
+    ticker: str
+    price_first: str | None = None
+    price_last: str | None = None
+    periods: int = 0                  # trailing-twelve-month rows available
+    latest_period: str | None = None
+    earnings_events: int = 0
+    warning: str | None = None
+    error: str | None = None
 
 
 class FreeDataClient:
@@ -154,6 +169,30 @@ class FreeDataClient:
     def get_market_cap(self, ticker: str, end_date: str) -> float | None:
         rows = self.get_financial_metrics(ticker, end_date, limit=1)
         return rows[0].market_cap if rows else None
+
+    def coverage(self, tickers: list[str], as_of: str) -> list[Coverage]:
+        """Sync every ticker and report what is available as of `as_of`."""
+        self.prefetch_prices(tickers, as_of)
+        out = []
+        for ticker in tickers:
+            row = Coverage(ticker)
+            bars = self._store.prices(ticker, PRICE_HISTORY_START, as_of)
+            if bars:
+                row.price_first, row.price_last = bars[0].time[:10], bars[-1].time[:10]
+            try:
+                metrics = self.get_financial_metrics(ticker, as_of, limit=40)
+                row.periods = len(metrics)
+                row.latest_period = metrics[0].report_period if metrics else None
+                row.earnings_events = len(self.get_earnings_history(ticker, limit=40))
+                cik = self._store.company(ticker)["cik"]
+                newest_fact = max((m.filing_date for m in metrics if m.filing_date), default="")
+                pending = [f for f in self._store.filings(cik, ["10-Q", "10-K"]) if f["filed"] > newest_fact]
+                if pending and metrics:
+                    row.warning = f"SEC data feed has not published the {pending[-1]['form']} filed {pending[-1]['filed']} yet"
+            except (DataSourceError, TypeError, KeyError) as exc:
+                row.error = str(exc)
+            out.append(row)
+        return out
 
     # -- not provided by the free sources (unused by the current analysts) ----
 
