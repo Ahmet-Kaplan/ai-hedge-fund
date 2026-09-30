@@ -275,7 +275,7 @@ def test_market_cap_and_pe_use_filing_date_raw_close(cache):
     r = _client(cache, price_source=prices).get_financial_metrics("KO", "2020-02-28", limit=1)[0]
     shares = 4_290_276_067  # dei cover shares of this 10-K
     assert r.market_cap == pytest.approx(shares * 50.0)
-    assert r.price_to_earnings_ratio == pytest.approx(shares * 50.0 / 8_920e6)
+    assert r.price_to_earnings_ratio == pytest.approx(50.0 / 2.07)  # price / TTM diluted EPS
     assert r.price_to_book_ratio is not None and r.free_cash_flow_yield is not None
     assert _client(cache, price_source=prices).get_market_cap("KO", "2020-02-28") == pytest.approx(r.market_cap)
 

@@ -39,7 +39,9 @@ aihf
 
 The app asks for keys the first time it needs them and saves them to `~/.hedge-fund/.env` — nothing to configure up front. It needs:
 
-- A [Financial Datasets](https://financialdatasets.ai) API key, for prices, fundamentals, and earnings.
+- A [Tiingo](https://www.tiingo.com) API key (the free tier is enough for a small universe), for daily prices, splits, and dividends. Each ticker's full history is downloaded once and kept in `~/.hedge-fund/cache/tiingo/`.
+- `SEC_USER_AGENT` — your name and email (e.g. `Jane Doe jane@example.com`), which the SEC requires from anyone using [EDGAR](https://www.sec.gov/os/accessing-edgar-data). Fundamentals come from SEC filings, point-in-time by filing date; no key or payment needed.
+- Optional: a [Financial Datasets](https://financialdatasets.ai) API key, only for earnings/news/insider data (the PEAD model and event study) via `HEDGE_FUND_DATA_SUPPLEMENT=financial-datasets`, or to use it for everything via `HEDGE_FUND_DATA_PROVIDER=financial-datasets`.
 - One model API key for the investor agents. Supported providers: Anthropic, OpenAI, DeepSeek, Google, xAI, Kimi, TypeSafe (Jev).
 
 Keys exported in your shell always win over the saved file.

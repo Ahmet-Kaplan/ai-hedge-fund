@@ -6,10 +6,12 @@ Usage::
     python -m hedge_fund.verification --universe-file configs/baseline-universe.yaml --out verification.json
     python -m hedge_fund.verification --preflight   # key check only, no requests
 
-Reads FINANCIAL_DATASETS_API_KEY from the process environment only — no .env
+Reads the data provider's keys (make_data_client: TIINGO_API_KEY and
+SEC_USER_AGENT by default) from the process environment only — no .env
 files — and exits 2 naming whatever is missing, without making a request.
-Uses a raw, uncached FDClient so the provider itself is observed; a full run
-costs roughly 60-100 API requests (more with a universe).
+Prices are downloaded once per ticker and kept in the local Tiingo store, so
+a first run costs about one Tiingo request per ticker plus ~2 SEC requests
+per company, and a repeat run close to none.
 
 Exit codes: 0 all checks pass/info, 1 any fail/error/inconclusive, 2 keys missing.
 """
@@ -23,7 +25,8 @@ from pathlib import Path
 
 import yaml
 
-from hedge_fund.verification.runner import CountingFDClient, missing_env, required_env, run_checks
+from hedge_fund.data.factory import make_data_client, required_data_env
+from hedge_fund.verification.runner import missing_env, request_count, required_env, run_checks
 
 _MARK = {"pass": "PASS", "fail": "FAIL", "inconclusive": "INCONCLUSIVE", "info": "INFO", "error": "ERROR", "skipped": "SKIPPED"}
 
@@ -53,8 +56,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {name}: {'MISSING' if name in missing else 'set'}", file=sys.stderr)
     if args.preflight:
         return 2 if missing else 0
-    if "FINANCIAL_DATASETS_API_KEY" in missing:
-        print("\nFINANCIAL_DATASETS_API_KEY is not set — no data checks were run. "
+    data_missing = [name for name in required_data_env() if name in missing]
+    if data_missing:
+        print(f"\n{', '.join(data_missing)} not set — no data checks were run. "
               "Export it in your shell and rerun.", file=sys.stderr)
         return 2
 
@@ -63,16 +67,18 @@ def main(argv: list[str] | None = None) -> int:
     def show(result):
         print(f"[{_MARK[result.status]:>12}] {result.name}: {result.summary}", file=sys.stderr)
 
-    with CountingFDClient() as client:
+    with make_data_client() as client:
         results = run_checks(client, universe, (args.start, args.end), on_result=show)
-        requests_made = client.requests
+        requests_made = request_count(client)
+        by_source = client.request_counts() if hasattr(client, "request_counts") else {}
 
-    report = {"requests_made": requests_made, "results": [r.model_dump() for r in results]}
+    report = {"requests_made": requests_made, "requests_by_source": by_source,
+              "results": [r.model_dump() for r in results]}
     text = json.dumps(report, indent=2, default=str)
     print(text)
     if args.out:
         Path(args.out).write_text(text)
-    print(f"\n{requests_made} HTTP requests made.", file=sys.stderr)
+    print(f"\n{requests_made} HTTP requests made {by_source}.", file=sys.stderr)
     return 0 if all(r.status in ("pass", "info") for r in results) else 1
 
 

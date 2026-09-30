@@ -43,6 +43,12 @@ def test_alphabet_lineage_includes_google_inc_until_reorganization():
     assert ident.lineage() == [(1652044, None), (1288776, "2015-10-01")]
 
 
+def test_exxon_lineage_includes_pre_reorganization_registrant():
+    # SEC's current map points XOM at the 2026 holding company, which has no history
+    ident = TickerResolver(current={"XOM": 2115436}).resolve("XOM", "2020-01-01")
+    assert ident.lineage() == [(2115436, None), (34088, "2026-07-01")]
+
+
 def test_recycled_ticker_resolves_by_date():
     history = {"XYZ": [
         Identity("XYZ", 111, start_date="2000-01-01", end_date="2010-06-30"),

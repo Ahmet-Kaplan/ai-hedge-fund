@@ -5,8 +5,10 @@ checks.py. A request that fails becomes an `error` result carrying the
 message; nothing is retried into a pass and nothing is filled in. Checks are
 independent, so one failing endpoint never hides the others.
 
-Run through the CLI (``python -m hedge_fund.verification``) with a raw,
-uncached FDClient: the point is to observe the provider, not the disk cache.
+Run through the CLI (``python -m hedge_fund.verification``) with the
+configured data client (`make_data_client`, Tiingo + SEC EDGAR by default).
+Their local stores are part of what is verified: `price_cache` checks that a
+long history is downloaded once and later ranges are served from disk.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ import os
 from datetime import date, timedelta
 from typing import Callable
 
-from hedge_fund.data.client import FDClient, FDClientError
+from hedge_fund.data.factory import required_data_env
 from hedge_fund.features.snapshot import MIN_PERIODS
 from hedge_fund.llm.registry import env_var_for, provider_for
 from hedge_fund.verification.checks import (
@@ -54,30 +56,22 @@ DELISTED_CASES = [
     ("FRC", "2023-04-28"),   # bank failure
 ]
 
-BATCH_TICKERS = ["AAPL", "MSFT"]
-
-
-class CountingFDClient(FDClient):
-    """FDClient that counts HTTP requests, pagination pages included."""
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.requests = 0
-
-    def _request(self, method, path, **kwargs):
-        self.requests += 1
-        return super()._request(method, path, **kwargs)
+# A long single-ticker range, then a sub-range that must come from the local store.
+CACHE_PROBE = ("AAPL", "2014-01-01", "2024-12-31")
+CACHE_SUBRANGE = ("2019-01-02", "2019-12-31")
+MIN_HISTORY_YEARS = 10
 
 
 def required_env(model: str | None = None) -> list[str]:
-    """Environment variables a Buffett-baseline backtest needs for *model*.
+    """Environment variables a Buffett-baseline backtest needs for *model*:
+    the data provider's (make_data_client) then the LLM's.
 
     Mirrors make_llm's routing: unlisted model ids use the Anthropic
     transport. Kimi also accepts MOONSHOT_API_KEY (checked by missing_env).
     """
     model = model or os.environ.get("HEDGE_FUND_LLM_MODEL") or "claude-opus-5-5"
     provider = provider_for(model) or "Anthropic"
-    return ["FINANCIAL_DATASETS_API_KEY", env_var_for(provider) or "ANTHROPIC_API_KEY"]
+    return [*required_data_env(), env_var_for(provider) or "ANTHROPIC_API_KEY"]
 
 
 def missing_env(names: list[str]) -> list[str]:
@@ -189,33 +183,57 @@ def check_delisted(client, cases=DELISTED_CASES) -> CheckResult:
                      what="delisted tickers with prices+fundamentals")
 
 
-def check_batching(client: CountingFDClient, tickers=BATCH_TICKERS) -> CheckResult:
-    """How many requests a long single-ticker series costs, and whether the
-    prices endpoint accepts several tickers in one call."""
-    before = client.requests
-    bars = client.get_prices(tickers[0], "2019-01-01", "2024-12-31")
-    single = {"ticker": tickers[0], "range": "2019-01-01..2024-12-31", "bars": len(bars), "http_requests": client.requests - before}
+def request_count(client) -> int | None:
+    """Total HTTP requests a client has made, if it keeps count."""
+    counts = getattr(client, "request_counts", None)
+    if callable(counts):
+        return sum(counts().values())
+    n = getattr(client, "requests", None)
+    return n if isinstance(n, int) else None
 
-    multi: dict = {"param": "tickers", "value": ",".join(tickers)}
-    try:
-        resp = client._request("GET", "/prices/", params={
-            "tickers": ",".join(tickers), "interval": "day", "interval_multiplier": 1,
-            "start_date": "2024-12-02", "end_date": "2024-12-06",
-        })
-        if resp is None:
-            multi["outcome"] = "404"
-        else:
-            body = resp.json()
-            rows = body.get("prices") or []
-            multi.update(outcome="200", response_keys=sorted(body), rows=len(rows),
-                         tickers_in_rows=sorted({r.get("ticker") for r in rows if isinstance(r, dict) and r.get("ticker")}))
-    except FDClientError as exc:
-        multi.update(outcome=f"rejected ({exc.status_code})", message=str(exc)[:200])
 
-    supported = multi.get("outcome") == "200" and len(multi.get("tickers_in_rows", [])) > 1
-    summary = (f"{single['bars']} daily bars for one ticker cost {single['http_requests']} request(s); "
-               f"multi-ticker prices request: {'supported' if supported else 'not supported/unclear — ' + str(multi.get('outcome'))}")
-    return CheckResult(name="price_batching", status="info", summary=summary, details={"single_ticker": single, "multi_ticker": multi})
+def check_price_cache(client, probe=CACHE_PROBE, subrange=CACHE_SUBRANGE, min_years=MIN_HISTORY_YEARS) -> CheckResult:
+    """Provider-neutral price plumbing: a long history exists, is fetched
+    once, and later sub-ranges are served locally and identically."""
+    ticker, start, end = probe
+    before = request_count(client)
+    bars = client.get_prices(ticker, start, end)
+    after_full = request_count(client)
+    sub = client.get_prices(ticker, *subrange)
+    after_sub = request_count(client)
+    expected = [b for b in bars if subrange[0] <= b.time[:10] <= subrange[1]]
+    days = [b.time[:10] for b in bars]
+    span_years = ((date.fromisoformat(days[-1]) - date.fromisoformat(days[0])).days / 365.25) if days else 0.0
+    details = {
+        "ticker": ticker, "range": f"{start}..{end}", "bars": len(bars),
+        "first_bar": days[0] if days else None, "last_bar": days[-1] if days else None,
+        "span_years": round(span_years, 2),
+        "requests_full_range": None if before is None else after_full - before,
+        "requests_subrange": None if after_full is None else after_sub - after_full,
+        "subrange_bars": len(sub), "subrange_matches_full": [b.model_dump() for b in sub] == [b.model_dump() for b in expected],
+        "ordered_unique": days == sorted(set(days)),
+    }
+    problems = []
+    if span_years < min_years:
+        problems.append(f"only {span_years:.1f} years of history")
+    if not details["subrange_matches_full"]:
+        problems.append("sub-range differs from the same dates in the full range")
+    if not details["ordered_unique"]:
+        problems.append("bars out of order or duplicated")
+    if details["requests_subrange"]:
+        problems.append(f"sub-range cost {details['requests_subrange']} extra request(s)")
+    if problems:
+        return CheckResult(name="price_cache", status="fail", summary="; ".join(problems), details=details)
+    if details["requests_subrange"] is None:
+        return CheckResult(name="price_cache", status="inconclusive",
+                           summary=f"{span_years:.1f} years consistent, but the client does not count requests",
+                           details=details)
+    return CheckResult(
+        name="price_cache", status="pass",
+        summary=(f"{len(bars)} bars over {span_years:.1f} years for {details['requests_full_range']} request(s) "
+                 f"(0 = already in the local store); sub-range served locally (0 requests) and identical"),
+        details=details,
+    )
 
 
 def check_universe(client, universe: list[str], start: str, end: str) -> CheckResult:
@@ -238,7 +256,7 @@ def check_universe(client, universe: list[str], start: str, end: str) -> CheckRe
 # Orchestration
 # ---------------------------------------------------------------------------
 
-def run_checks(client: CountingFDClient, universe: list[str] | None = None, window: tuple[str, str] | None = None,
+def run_checks(client, universe: list[str] | None = None, window: tuple[str, str] | None = None,
                on_result: Callable[[CheckResult], None] | None = None) -> list[CheckResult]:
     """Run every check; a raised error becomes that check's `error` result."""
     plan: list[tuple[str, Callable[[], CheckResult]]] = [
@@ -246,7 +264,7 @@ def run_checks(client: CountingFDClient, universe: list[str] | None = None, wind
         ("valuation_timestamps", lambda: check_valuation_timestamps(client)),
         ("point_in_time", lambda: check_point_in_time(client)),
         ("delisted_coverage", lambda: check_delisted(client)),
-        ("price_batching", lambda: check_batching(client)),
+        ("price_cache", lambda: check_price_cache(client)),
     ]
     if universe:
         start, end = window or ("2025-01-01", "2026-08-31")

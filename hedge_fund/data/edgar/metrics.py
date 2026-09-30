@@ -39,6 +39,18 @@ def _growth(now: float | None, before: float | None) -> float | None:
     return (now - before) / abs(before)
 
 
+def _price_to_earnings(price: float | None, eps: float | None, market_cap: float | None,
+                       net_income: float | None) -> float | None:
+    """Price over TTM diluted EPS, both as of the filing — so P/E x EPS is
+    the filing-date close. Market cap / net income differs from it by
+    preferred dividends and the diluted-vs-outstanding share gap (~5% at JPM
+    and PG), and is only the fallback when no EPS exists. Non-positive
+    earnings have no P/E."""
+    if price is not None and eps is not None:
+        return price / eps if eps > 0 else None
+    return _ratio(market_cap, net_income)
+
+
 def _plausible_weighted(weighted: float | None, outstanding: float | None) -> float | None:
     """Weighted-average shares, unless they disagree with shares outstanding
     by more than 2x — the signature of a scale error in the filing's tagging
@@ -122,7 +134,7 @@ def to_metrics(ticker: str, fv: FilingValues, classed: bool, split_factor: float
         ticker=ticker, report_period=fv.filing.report_period, period="ttm", currency="USD",
         filing_date=fv.filing.filed, filing_datetime=None,
         market_cap=market_cap, enterprise_value=ev,
-        price_to_earnings_ratio=_ratio(market_cap, ni),
+        price_to_earnings_ratio=_price_to_earnings(fv.price, eps, market_cap, ni),
         price_to_book_ratio=_ratio(market_cap, equity),
         price_to_sales_ratio=_ratio(market_cap, rev),
         enterprise_value_to_ebitda_ratio=_ratio(ev, ebitda),

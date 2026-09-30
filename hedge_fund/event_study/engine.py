@@ -16,10 +16,10 @@ This is the main orchestration module. The pipeline:
     4. Return EventStudyResult with per-event detail + aggregate stats.
 
 Usage:
-    from hedge_fund.data import FDClient
+    from hedge_fund.data import make_data_client
     from hedge_fund.event_study import compute_car
 
-    with FDClient() as fd:
+    with make_data_client() as fd:
         result = compute_car(["AAPL", "MSFT"], fd, earnings_limit=12)
 """
 

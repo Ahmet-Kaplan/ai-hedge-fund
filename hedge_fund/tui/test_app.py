@@ -34,7 +34,8 @@ def isolated_configuration(tmp_path, monkeypatch):
     monkeypatch.setattr(keys, "ENV_PATH", saved)
     monkeypatch.setattr(ui, "ENV_PATH", saved)
     monkeypatch.setattr(ui, "ensure_mandates_dir", lambda: mandates)
-    for variable in (*PROVIDER_ENV_VARS.values(), "MOONSHOT_API_KEY", "FINANCIAL_DATASETS_API_KEY", "HEDGE_FUND_LLM_MODEL", "UNRELATED_KEY"):
+    for variable in (*PROVIDER_ENV_VARS.values(), "MOONSHOT_API_KEY", "FINANCIAL_DATASETS_API_KEY", "TIINGO_API_KEY", "SEC_USER_AGENT",
+                     "HEDGE_FUND_DATA_PROVIDER", "HEDGE_FUND_DATA_SUPPLEMENT", "HEDGE_FUND_LLM_MODEL", "UNRELATED_KEY"):
         # Track even initially absent keys, since dotenv and the UI set them
         # directly rather than through monkeypatch.
         monkeypatch.setenv(variable, "")
@@ -115,7 +116,8 @@ def test_picker_and_masked_key_save_or_cancel(save, isolated_configuration):
 
 
 def test_missing_key_gate_save_resumes_and_cancel_does_not(monkeypatch, isolated_configuration):
-    monkeypatch.setenv("FINANCIAL_DATASETS_API_KEY", "fixture-fd-key")
+    monkeypatch.setenv("TIINGO_API_KEY", "fixture-tiingo-key")
+    monkeypatch.setenv("SEC_USER_AGENT", "Fixture fixture@example.com")
     monkeypatch.setenv("HEDGE_FUND_LLM_MODEL", "jev-1.13.0")
 
     async def scenario():

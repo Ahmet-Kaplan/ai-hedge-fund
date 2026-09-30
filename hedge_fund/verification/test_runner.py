@@ -8,14 +8,14 @@ from hedge_fund.data.client import FDClientError
 from hedge_fund.data.models import CompanyFacts, FinancialMetrics, Price
 from hedge_fund.verification import __main__ as cli
 from hedge_fund.verification.runner import (
-    CountingFDClient,
-    check_batching,
     check_delisted,
+    check_price_cache,
     check_point_in_time,
     check_split_adjustment,
     check_universe,
     check_valuation_timestamps,
     missing_env,
+    request_count,
     required_env,
     run_checks,
 )
@@ -129,35 +129,69 @@ def test_universe_check_flags_missing_names_and_short_history():
     assert result.status == "fail"
 
 
-class _Resp:
-    def __init__(self, status, payload):
-        self.status_code, self._payload, self.text = status, payload, ""
+class CountingClient(FakeClient):
+    """A client with a local store: the first request per ticker is one
+    HTTP request, every later range is served from memory."""
 
-    def json(self):
-        return self._payload
+    def __init__(self, closes, **kw):
+        super().__init__(closes, **kw)
+        self.requests = 0
+        self._downloaded = set()
 
-
-def test_batching_counts_pages_and_reports_rejected_multi_ticker():
-    client = CountingFDClient(api_key="test")
-    responses = [
-        _Resp(200, {"prices": [_bar("2019-01-02", 1.0).model_dump()], "next_page_url": "https://x/page2"}),
-        _Resp(200, {"prices": [_bar("2019-01-03", 1.0).model_dump()]}),
-        _Resp(400, {}),
-    ]
-    client._session.request = lambda *a, **k: responses.pop(0)
-    result = check_batching(client)
-    assert result.status == "info"
-    assert result.details["single_ticker"] == {"ticker": "AAPL", "range": "2019-01-01..2024-12-31", "bars": 2, "http_requests": 2}
-    assert result.details["multi_ticker"]["outcome"] == "rejected (400)"
-    assert client.requests == 3
+    def get_prices(self, ticker, start_date, end_date, **kw):
+        if ticker not in self._downloaded:
+            self._downloaded.add(ticker)
+            self.requests += 1
+        return super().get_prices(ticker, start_date, end_date)
 
 
-def test_batching_recognizes_multi_ticker_support():
-    client = CountingFDClient(api_key="test")
-    rows = [{**_bar("2024-12-02", 1.0).model_dump(), "ticker": t} for t in ("AAPL", "MSFT")]
-    responses = [_Resp(200, {"prices": []}), _Resp(200, {"prices": rows})]
-    client._session.request = lambda *a, **k: responses.pop(0)
-    assert "multi-ticker prices request: supported" in check_batching(client).summary
+def _weekdays(start, end):
+    return {d: 100.0 for d, _ in _daily(start, end, 0).items() if date.fromisoformat(d).weekday() < 5}
+
+
+def test_price_cache_passes_when_history_is_long_and_served_locally():
+    result = check_price_cache(CountingClient({"AAPL": _weekdays("2012-01-03", "2024-12-31")}))
+    assert result.status == "pass"
+    assert result.details["requests_full_range"] == 1 and result.details["requests_subrange"] == 0
+    assert result.details["span_years"] >= 10
+
+
+def test_price_cache_fails_when_subrange_costs_requests():
+    class Uncached(CountingClient):
+        def get_prices(self, ticker, start_date, end_date, **kw):
+            self.requests += 1
+            return FakeClient.get_prices(self, ticker, start_date, end_date)
+
+    result = check_price_cache(Uncached({"AAPL": _weekdays("2012-01-03", "2024-12-31")}))
+    assert result.status == "fail" and "extra request" in result.summary
+
+
+def test_price_cache_fails_on_short_history_or_inconsistent_ranges():
+    short = check_price_cache(CountingClient({"AAPL": _weekdays("2020-01-02", "2024-12-31")}))
+    assert short.status == "fail" and "years of history" in short.summary
+
+    class Drifting(CountingClient):
+        def get_prices(self, ticker, start_date, end_date, **kw):
+            bars = super().get_prices(ticker, start_date, end_date)
+            return [b.model_copy(update={"close": b.close * (2 if start_date > "2015" else 1)}) for b in bars]
+
+    drift = check_price_cache(Drifting({"AAPL": _weekdays("2012-01-03", "2024-12-31")}))
+    assert drift.status == "fail" and "differs" in drift.summary
+
+
+def test_price_cache_inconclusive_without_request_counter():
+    result = check_price_cache(FakeClient({"AAPL": _weekdays("2012-01-03", "2024-12-31")}))
+    assert result.status == "inconclusive"
+
+
+def test_request_count_reads_composite_and_simple_clients():
+    class Composite:
+        def request_counts(self):
+            return {"tiingo": 2, "sec": 3}
+
+    assert request_count(Composite()) == 5
+    assert request_count(CountingClient({})) == 0
+    assert request_count(FakeClient()) is None
 
 
 # ---------------------------------------------------------------------------
@@ -172,16 +206,21 @@ def test_run_checks_turns_exceptions_into_error_results():
     seen = []
     results = run_checks(Broken(), ["AAPL"], ("2025-01-01", "2025-02-01"), on_result=seen.append)
     assert [r.name for r in results] == ["split_adjustment", "valuation_timestamps", "point_in_time",
-                                         "delisted_coverage", "price_batching", "universe_coverage"]
+                                         "delisted_coverage", "price_cache", "universe_coverage"]
     assert results[0].status == "error" and "401" in results[0].summary
     assert seen == results
 
 
-def test_required_env_follows_model_routing(monkeypatch):
+def test_required_env_follows_data_provider_and_model_routing(monkeypatch):
     monkeypatch.delenv("HEDGE_FUND_LLM_MODEL", raising=False)
+    monkeypatch.delenv("HEDGE_FUND_DATA_PROVIDER", raising=False)
+    monkeypatch.delenv("HEDGE_FUND_DATA_SUPPLEMENT", raising=False)
+    data = ["TIINGO_API_KEY", "SEC_USER_AGENT"]
+    assert required_env() == [*data, "ANTHROPIC_API_KEY"]
+    assert required_env("gpt-6-sol") == [*data, "OPENAI_API_KEY"]
+    assert required_env("some-unlisted-model") == [*data, "ANTHROPIC_API_KEY"]
+    monkeypatch.setenv("HEDGE_FUND_DATA_PROVIDER", "financial-datasets")
     assert required_env() == ["FINANCIAL_DATASETS_API_KEY", "ANTHROPIC_API_KEY"]
-    assert required_env("gpt-6-sol") == ["FINANCIAL_DATASETS_API_KEY", "OPENAI_API_KEY"]
-    assert required_env("some-unlisted-model") == ["FINANCIAL_DATASETS_API_KEY", "ANTHROPIC_API_KEY"]
 
 
 def test_missing_env_accepts_moonshot_alias(monkeypatch):
@@ -191,15 +230,21 @@ def test_missing_env_accepts_moonshot_alias(monkeypatch):
 
 
 def test_cli_stops_cleanly_without_data_key(monkeypatch, capsys):
-    monkeypatch.delenv("FINANCIAL_DATASETS_API_KEY", raising=False)
-    monkeypatch.setattr(cli, "CountingFDClient", lambda *a, **k: pytest.fail("must not build a client without a key"))
+    monkeypatch.delenv("HEDGE_FUND_DATA_PROVIDER", raising=False)
+    monkeypatch.delenv("HEDGE_FUND_DATA_SUPPLEMENT", raising=False)
+    monkeypatch.delenv("TIINGO_API_KEY", raising=False)
+    monkeypatch.setenv("SEC_USER_AGENT", "Test test@example.com")
+    monkeypatch.setattr(cli, "make_data_client", lambda *a, **k: pytest.fail("must not build a client without a key"))
     assert cli.main([]) == 2
     err = capsys.readouterr().err
-    assert "FINANCIAL_DATASETS_API_KEY: MISSING" in err and "no data checks were run" in err
+    assert "TIINGO_API_KEY: MISSING" in err and "no data checks were run" in err
 
 
 def test_cli_preflight_reports_llm_key(monkeypatch, capsys):
-    monkeypatch.setenv("FINANCIAL_DATASETS_API_KEY", "x")
+    monkeypatch.delenv("HEDGE_FUND_DATA_PROVIDER", raising=False)
+    monkeypatch.delenv("HEDGE_FUND_DATA_SUPPLEMENT", raising=False)
+    monkeypatch.setenv("TIINGO_API_KEY", "x")
+    monkeypatch.setenv("SEC_USER_AGENT", "Test test@example.com")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("HEDGE_FUND_LLM_MODEL", raising=False)
     assert cli.main(["--preflight"]) == 2

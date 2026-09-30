@@ -27,6 +27,7 @@ import gzip
 import json
 import logging
 import os
+import threading
 import time
 from datetime import date, datetime, timedelta
 from math import isfinite, prod
@@ -55,6 +56,15 @@ logger = logging.getLogger(__name__)
 DEFAULT_CACHE_DIR = CACHE_DIR / "edgar"
 USER_AGENT_ENV = "SEC_USER_AGENT"
 _ANNUAL_FORMS = frozenset({"10-K", "10-KT"})
+
+# One download per document at a time across threads (the TUI fans out).
+_DOC_LOCKS: dict[str, threading.Lock] = {}
+_DOC_LOCKS_GUARD = threading.Lock()
+
+
+def _doc_lock(path: Path) -> threading.Lock:
+    with _DOC_LOCKS_GUARD:
+        return _DOC_LOCKS.setdefault(str(path.resolve()), threading.Lock())
 
 
 class EdgarClientError(Exception):
@@ -371,6 +381,10 @@ class EdgarClient:
 
     def _cached(self, rel: str, fetch, trim, immutable: bool = False):
         path = self._dir / rel
+        with _doc_lock(path):
+            return self._cached_locked(path, rel, fetch, trim, immutable)
+
+    def _cached_locked(self, path: Path, rel: str, fetch, trim, immutable: bool):
         hit = self._read(path)
         if hit is not None:
             fresh = immutable or self._offline or self._max_age is None
@@ -403,7 +417,7 @@ class EdgarClient:
     @staticmethod
     def _write(path: Path, payload: dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp = path.with_suffix(f"{path.suffix}.{os.getpid()}.{threading.get_ident()}.tmp")
         with gzip.open(tmp, "wt") as fh:
             json.dump(payload, fh, separators=(",", ":"))
         tmp.replace(path)

@@ -1,8 +1,9 @@
 ticker,cik,start_date,end_date,predecessor_cik,predecessor_until,note
 GOOGL,1652044,2015-10-02,,1288776,2015-10-01,Alphabet Inc.; Google Inc. (CIK 1288776) filed until the October 2015 holding-company reorganization
 GOOG,1652044,2015-10-02,,1288776,2015-10-01,Alphabet Inc. Class C; same lineage as GOOGL
-BRK.A,1067983,,,,,Berkshire Hathaway Class A (share-class units in share_classes.py)
-BRK.B,1067983,,,,,Berkshire Hathaway Class B (share-class units in share_classes.py)
+XOM,2115436,2026-07-01,,34088,2026-07-01,ExxonMobil Holdings Corp.; Exxon Mobil Corp. (CIK 34088) filed until the July 2026 holding-company reorganization
+BRK.A,1067983,,,,,Berkshire Hathaway Class A (share-class units: identity.SHARE_CLASSES)
+BRK.B,1067983,,,,,Berkshire Hathaway Class B (share-class units: identity.SHARE_CLASSES)
 TWTR,1418091,2013-11-07,2022-10-27,,,Twitter Inc.; taken private October 2022
 ATVI,718877,,2023-10-12,,,Activision Blizzard; acquired by Microsoft October 2023
 SIVB,719739,,2023-03-09,,,SVB Financial Group; trading halted March 2023 after bank failure
