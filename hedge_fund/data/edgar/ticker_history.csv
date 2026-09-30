@@ -1,0 +1,11 @@
+ticker,cik,start_date,end_date,predecessor_cik,predecessor_until,note
+GOOGL,1652044,2015-10-02,,1288776,2015-10-01,Alphabet Inc.; Google Inc. (CIK 1288776) filed until the October 2015 holding-company reorganization
+GOOG,1652044,2015-10-02,,1288776,2015-10-01,Alphabet Inc. Class C; same lineage as GOOGL
+BRK.A,1067983,,,,,Berkshire Hathaway Class A (share-class units in share_classes.py)
+BRK.B,1067983,,,,,Berkshire Hathaway Class B (share-class units in share_classes.py)
+TWTR,1418091,2013-11-07,2022-10-27,,,Twitter Inc.; taken private October 2022
+ATVI,718877,,2023-10-12,,,Activision Blizzard; acquired by Microsoft October 2023
+SIVB,719739,,2023-03-09,,,SVB Financial Group; trading halted March 2023 after bank failure
+SIVBQ,719739,2023-03-28,,,,SVB Financial Group OTC successor symbol after bankruptcy filing
+FRC,,,2023-04-28,,,First Republic Bank; filed with the FDIC not the SEC so EDGAR has no XBRL fundamentals
+FRCB,,2023-05-01,,,,First Republic Bank OTC successor symbol; no SEC fundamentals

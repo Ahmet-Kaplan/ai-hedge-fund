@@ -13,6 +13,7 @@ packages = [
 ]
 exclude = [
     "hedge_fund/**/test_*.py",
+    "hedge_fund/**/testdata/**",
     "hedge_fund/conftest.py",
 ]
 
