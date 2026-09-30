@@ -36,11 +36,12 @@ from hedge_fund.core.instruments import InstrumentRegistry
 from hedge_fund.core.orders import FillEvent, OrderRequest, OrderStatus
 from hedge_fund.systematic import metrics
 from hedge_fund.systematic.benchmark import benchmark_curve
-from hedge_fund.systematic.ensemble import Ensemble, EnsembleConfig, StrategyEvidence
+from hedge_fund.systematic.decision import DecisionEngine, marks_for
+from hedge_fund.systematic.ensemble import EnsembleConfig, StrategyEvidence
 from hedge_fund.systematic.execution import CostModel, FillTiming, SimulatedExecution
 from hedge_fund.systematic.ledger import Ledger
-from hedge_fund.systematic.portfolio import PortfolioConfig, target_weights
-from hedge_fund.systematic.risk import RiskConfig, RiskEngine, RiskState
+from hedge_fund.systematic.portfolio import PortfolioConfig
+from hedge_fund.systematic.risk import RiskConfig, RiskState
 
 
 class BacktestConfig(BaseModel):
@@ -97,38 +98,15 @@ class SystematicBacktester:
     def __init__(self, panel, strategies: list, config: BacktestConfig, *,
                  evidence: dict[str, StrategyEvidence] | None = None, regime=None,
                  instruments: InstrumentRegistry | None = None, kill_switch_on: str | None = None) -> None:
-        if not strategies:
-            raise ValueError("at least one strategy is required")
-        if len(strategies) > 1 and evidence is None:
-            raise ValueError("combining strategies needs validation evidence for the ensemble")
         self.panel, self.strategies, self.config = panel, strategies, config
         self.evidence, self.regime = evidence, regime
         self.instruments = instruments or InstrumentRegistry()
         self.execution = SimulatedExecution(panel, config.costs, config.timing, self.instruments)
-        self.risk = RiskEngine(config.risk)
-        self.ensemble = Ensemble(config.ensemble)
+        self.decider = DecisionEngine(strategies, config, evidence=evidence, regime=regime,
+                                      instruments=self.instruments)
         self.kill_switch_on = kill_switch_on        # test/drill hook: engage the kill switch from this session
 
     # ------------------------------------------------------------------
-
-    def _scores(self, view, signals: dict[str, list], regime_state):
-        if self.evidence is None:                        # single strategy, no ensemble
-            (name, sigs), = signals.items()
-            scores = {s.ticker: s.value for s in sigs if not s.metadata.get("abstained")}
-            detail = {t: {"decision": "TRADE", "score": v, "contributions": {name: v}} for t, v in scores.items()}
-            return scores, detail, {name: 1.0}
-        decision = self.ensemble.combine(view.session, signals, self.evidence, regime_state)
-        detail = {t: d.model_dump() for t, d in decision.instruments.items()}
-        return decision.scores(), detail, decision.strategy_weights
-
-    def _marks(self, view, symbols) -> dict[str, float]:
-        closes = view.bars("close", tickers=sorted(symbols), tradable_only=False) if symbols else pd.DataFrame()
-        tradable = view.tradable(tickers=sorted(symbols)) if symbols else pd.DataFrame()
-        out = {}
-        for s in symbols:
-            good = closes[s].where(tradable[s]).dropna()
-            out[s] = float(good.iloc[-1]) if len(good) else float(closes[s].dropna().iloc[-1])
-        return out
 
     def run(self) -> BacktestResult:
         c = self.config
@@ -162,7 +140,7 @@ class SystematicBacktester:
                     liquidations.append(self._liquidate(sym, view, ledger))
                     untradable_run.pop(sym, None)
 
-            marks = self._marks(view, ledger.positions)
+            marks = marks_for(view, ledger.positions)
             eq = ledger.equity(marks)
             state.update(last_equity, new_session=True)      # day starts at the prior close
             state.update(eq, new_session=False)
@@ -174,7 +152,7 @@ class SystematicBacktester:
             last_equity = eq
 
             if session in rebalance_days and session != all_sessions[-1]:
-                record, pending = self._decide(view, ledger, marks, eq, state)
+                record, pending = self.decider.decide(view, ledger.positions, marks, eq, state)
                 decisions.append(record)
 
         sessions = all_sessions
@@ -196,46 +174,6 @@ class SystematicBacktester:
         )
 
     # ------------------------------------------------------------------
-
-    def _decide(self, view, ledger: Ledger, marks, eq, state):
-        signals = {s.name: s.generate(view) for s in self.strategies}
-        regime_state = self.regime.classify(view) if self.regime is not None else None
-        scores, detail, strategy_weights = self._scores(view, signals, regime_state)
-        targets = target_weights(scores, view, self.config.portfolio)
-        current = {s: self.instruments.get(s).notional(q, marks[s]) / eq for s, q in ledger.positions.items()} if eq > 0 else {}
-        risk = self.risk.apply(targets, equity=eq, current=current, state=state, view=view)
-        closes = self._marks(view, set(risk.weights) | set(ledger.positions))
-        orders = []
-        interventions: dict[str, list] = {}
-        for i in risk.interventions:
-            for t in ([i["ticker"]] if "ticker" in i else i.get("members", ["*"])):
-                interventions.setdefault(t, []).append(i["check"])
-        versions = {s.name: {"version": s.version, "config_hash": s.config_hash()} for s in self.strategies}
-        for sym in sorted(set(risk.weights) | set(ledger.positions)):
-            price = closes.get(sym)
-            if not price or not math.isfinite(price):
-                continue
-            inst = self.instruments.get(sym)
-            target_q = inst.round_quantity(risk.weights.get(sym, 0.0) * eq / (price * inst.multiplier))
-            delta = target_q - ledger.quantity(sym)
-            if abs(delta) < 1e-12:
-                continue
-            reason = {"data_as_of": view.session, "target_weight": risk.weights.get(sym, 0.0),
-                      "pre_risk_weight": targets.get(sym, 0.0), "ensemble": detail.get(sym),
-                      "risk_checks": interventions.get(sym, []) + interventions.get("*", []),
-                      "strategies": versions, "regime": regime_state.model_dump() if regime_state else None}
-            orders.append(OrderRequest(symbol=sym, side="buy" if delta > 0 else "sell", quantity=abs(delta),
-                                       decision_session=view.session, reference_price=price,
-                                       strategy="+".join(sorted(versions)), reason=reason).with_client_id())
-        record = {"session": view.session, "equity": eq, "regime": regime_state.model_dump() if regime_state else None,
-                  "strategy_weights": strategy_weights,
-                  "signals": {n: [{"ticker": s.ticker, "value": s.value, "abstained": bool(s.metadata.get("abstained"))}
-                                  for s in sigs] for n, sigs in signals.items()},
-                  "ensemble": detail, "pre_risk_targets": targets, "risk": {
-                      "weights": risk.weights, "interventions": risk.interventions, "halted": risk.halted,
-                      "reason": risk.reason},
-                  "orders": [o.client_order_id for o in orders]}
-        return record, orders
 
     @staticmethod
     def _split_adjust(order: OrderRequest, splits: pd.DataFrame) -> OrderRequest:
