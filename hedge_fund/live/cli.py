@@ -32,7 +32,8 @@ from hedge_fund.live.launchd import install_schedule, notify, schedule_installed
 from hedge_fund.live.ledger import Ledger
 from hedge_fund.live.report import MIN_REBALANCES_FOR_VERDICT, build_report, strategy_attribution
 from hedge_fund.live.runner import reconcile, session_to_reconcile, submit
-from hedge_fund.paths import KILL_PATH
+from hedge_fund.data.store import MarketStore
+from hedge_fund.paths import KILL_PATH, MARKET_DB_PATH
 from hedge_fund.tui.keys import apply_credentials
 
 logger = logging.getLogger("aihf-paper")
@@ -76,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--start", default=POST_CUTOFF_START)
     p.add_argument("--end", default=completed_through())
     p.add_argument("--out", help="where to write the JSON (default: the ledger's baseline/ dir)")
+    p.add_argument("--fresh", action="store_true", help="recompute variants already finished in an earlier run")
     command("data-sync", "download prices and SEC data for the universe; report coverage")
     command("install-schedule", "install the launchd jobs")
     command("uninstall-schedule", "remove the launchd jobs")
@@ -180,7 +182,8 @@ def _resume(args, spec: FundSpec, ledger: Ledger) -> int:
 
 def _baseline(args, spec: FundSpec, ledger: Ledger) -> int:
     with open_data_client() as raw:
-        report = run_baseline(spec, load_universe(args.universe), args.start, args.end, raw)
+        report = run_baseline(spec, load_universe(args.universe), args.start, args.end, raw,
+                              store=MarketStore(MARKET_DB_PATH), fresh=args.fresh)
     out = Path(args.out) if args.out else ledger.root / "baseline" / f"{args.start}_{args.end}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(report.model_dump_json(indent=2))
@@ -191,8 +194,10 @@ def _baseline(args, spec: FundSpec, ledger: Ledger) -> int:
         verdict = {True: "yes", False: "no", None: "-"}[r.beats_benchmarks]
         print(f"{r.name:24} {r.total_return_pct:>+8.1%} {r.annualized_return_pct:>+8.1%} {r.sharpe_ratio:>7.2f} "
               f"{r.max_drawdown_pct:>7.1%} {r.total_costs:>9,.0f}  {verdict}")
+    for name, error in report.failed.items():
+        print(f"FAILED {name}: {error}  (re-run to retry just this; finished variants are kept)")
     print(f"saved {out}")
-    return 0
+    return 1 if report.failed else 0
 
 
 def _data_sync(args, spec: FundSpec, ledger: Ledger) -> int:

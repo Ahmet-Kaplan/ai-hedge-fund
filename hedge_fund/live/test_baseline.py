@@ -82,3 +82,44 @@ def test_windows_before_the_cutoff_are_labelled():
     report = run_baseline(spec(), ["AAPL"], "2025-01-01", "2026-07-03", None,
                           backtest=lambda *a: result(0.0, 0.0))
     assert report.possibly_memorized is True
+
+
+# ---------------------------------------------------------------------------
+# Checkpoints
+# ---------------------------------------------------------------------------
+
+def test_finished_variants_are_reused_and_failures_recorded(tmp_path):
+    from hedge_fund.data.store import MarketStore
+    store = MarketStore(tmp_path / "m.db")
+    calls = []
+
+    def flaky(fund, start, end, data_client, universe):
+        calls.append(fund.spec.name)
+        if fund.spec.name == "pf-beta":
+            raise RuntimeError("LLM credit exhausted")
+        return result(0.05, 1.0)
+
+    report = run_baseline(spec(), ["AAPL"], "2026-07-01", "2026-07-03", None, backtest=flaky, store=store)
+    assert report.failed == {"only:beta": "LLM credit exhausted"}
+    assert {r.name for r in report.rows} == {"fund", "only:alpha", "equal-weight", "spy"}
+    assert len(calls) == 4
+
+    calls.clear()
+    rerun = run_baseline(spec(), ["AAPL"], "2026-07-01", "2026-07-03", None,
+                         backtest=lambda *a: calls.append(a[0].spec.name) or result(0.05, 1.0), store=store)
+    assert calls == ["pf-beta"]                       # only the failed variant is recomputed
+    assert rerun.failed == {}
+
+    calls.clear()
+    run_baseline(spec(), ["AAPL"], "2026-07-01", "2026-07-03", None,
+                 backtest=lambda *a: calls.append(a[0].spec.name) or result(0.05, 1.0), store=store, fresh=True)
+    assert len(calls) == 4
+
+
+def test_verdicts_need_both_yardsticks(tmp_path):
+    def no_equal_weight(fund, *a):
+        if fund.spec.name == "pf-equal-weight":
+            raise RuntimeError("boom")
+        return result(0.5, 50.0)
+    report = run_baseline(spec(), ["AAPL"], "2026-07-01", "2026-07-03", None, backtest=no_equal_weight)
+    assert all(r.beats_benchmarks is None for r in report.rows)
