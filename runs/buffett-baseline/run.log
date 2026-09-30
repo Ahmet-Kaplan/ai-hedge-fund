@@ -27,3 +27,15 @@
 16:46:20 cycle 22/119 executed 2018-05-01 · NAV $125,508 · LLM calls 68 · cache hits 242 · $1.43
 16:47:16 cycle 23/119 executed 2018-06-01 · NAV $130,196 · LLM calls 74 · cache hits 246 · $1.56
 16:47:17 cycle 24/119 executed 2018-07-02 · NAV $129,676 · LLM calls 74 · cache hits 266 · $1.56
+16:47:52 cycle 25/119 executed 2018-08-01 · NAV $132,649 · LLM calls 78 · cache hits 272 · $1.64
+16:48:49 cycle 26/119 executed 2018-09-04 · NAV $137,636 · LLM calls 84 · cache hits 286 · $1.77
+16:48:49 cycle 27/119 executed 2018-10-01 · NAV $136,954 · LLM calls 84 · cache hits 306 · $1.77
+16:49:56 cycle 28/119 executed 2018-11-01 · NAV $134,304 · LLM calls 91 · cache hits 309 · $1.92
+16:50:25 cycle 29/119 executed 2018-12-03 · NAV $132,813 · LLM calls 94 · cache hits 326 · $1.98
+16:50:26 cycle 30/119 executed 2019-01-02 · NAV $120,418 · LLM calls 94 · cache hits 346 · $1.98
+16:50:54 cycle 31/119 executed 2019-02-01 · NAV $130,108 · LLM calls 97 · cache hits 353 · $2.04
+16:52:02 cycle 32/119 executed 2019-03-01 · NAV $133,147 · LLM calls 104 · cache hits 356 · $2.19
+16:52:03 cycle 33/119 executed 2019-04-01 · NAV $137,053 · LLM calls 104 · cache hits 376 · $2.19
+16:52:52 cycle 34/119 executed 2019-05-01 · NAV $146,517 · LLM calls 109 · cache hits 381 · $2.30
+16:53:42 cycle 35/119 executed 2019-06-03 · NAV $130,719 · LLM calls 114 · cache hits 396 · $2.41
+16:53:43 cycle 36/119 executed 2019-07-01 · NAV $144,615 · LLM calls 114 · cache hits 416 · $2.41
