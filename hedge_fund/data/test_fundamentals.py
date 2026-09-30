@@ -122,3 +122,64 @@ def test_quarterly_values_derive_q4_and_ytd_differences():
     assert q["2025-06-30"] == pytest.approx(1.1)
     assert "2025-09-30" not in q                  # no 6-month YTD to difference against
     assert q["2025-12-31"] == pytest.approx(4.6 - 3.3)
+
+
+# ---------------------------------------------------------------------------
+# Earnings events (SUE) for PEAD
+# ---------------------------------------------------------------------------
+
+QUARTERS = [("01-01", "03-31"), ("04-01", "06-30"), ("07-01", "09-30"), ("10-01", "12-31")]
+EPS = {2023: [1.0, 1.0, 1.0, 1.0], 2024: [1.1, 1.2, 1.0, 1.1], 2025: [1.2, 1.3, 1.1, 1.2], 2026: [1.25, 2.0]}
+
+
+def eps_facts(eps=EPS):
+    rows = []
+    for year, values in eps.items():
+        for (start, end), value in zip(QUARTERS, values):
+            end_date = f"{year}-{end}"
+            rows.append(f("EarningsPerShareDiluted", f"{year}-{start}", end_date, value,
+                          _plus(end_date, 35), unit="USD/shares"))
+    return rows
+
+
+def _plus(day, days):
+    from datetime import date, timedelta
+    return (date.fromisoformat(day) + timedelta(days=days)).isoformat()
+
+
+FILINGS = [
+    {"accn": "k0", "form": "8-K", "filed": "2026-07-10", "report_date": "2026-07-10", "items": "5.02"},
+    {"accn": "k1", "form": "8-K", "filed": "2026-07-25", "report_date": "2026-07-25", "items": "2.02,9.01"},
+    {"accn": "q1", "form": "10-Q", "filed": "2026-05-05", "report_date": "2026-03-31", "items": ""},
+]
+
+
+def test_sue_events_classify_and_date_announcements():
+    from hedge_fund.data.fundamentals import earnings_events
+    events = earnings_events("TEST", eps_facts(), FILINGS, limit=12)
+    assert [e.report_period for e in events] == [
+        "2026-06-30", "2026-03-31", "2025-12-31", "2025-09-30", "2025-06-30", "2025-03-31"]
+    latest, previous = events[0], events[1]
+    # 2026Q2: +0.70 vs a year ago against a ~0.056 stdev of past changes → far above 1.0.
+    assert (latest.source_type, latest.filing_date, latest.quarterly.eps_surprise) == ("8-K", "2026-07-25", "BEAT")
+    assert latest.quarterly.earnings_per_share == pytest.approx(2.0)
+    # 2026Q1: +0.05 against a ~0.053 stdev → 0.93, a MEET; no 8-K, so the 10-Q date.
+    assert (previous.source_type, previous.filing_date, previous.quarterly.eps_surprise) == ("10-Q", "2026-05-05", "MEET")
+
+
+def test_sue_miss_and_limit():
+    from hedge_fund.data.fundamentals import earnings_events
+    eps = {**EPS, 2026: [1.25, 0.5]}
+    events = earnings_events("TEST", eps_facts(eps), FILINGS, limit=2)
+    assert len(events) == 2 and events[0].quarterly.eps_surprise == "MISS"
+
+
+def test_sue_events_drive_pead():
+    from hedge_fund.data.fundamentals import earnings_events
+    from hedge_fund.signals import PEADModel
+
+    class Client:
+        def get_earnings_history(self, ticker, limit=12):
+            return earnings_events(ticker, eps_facts(), FILINGS, limit)
+
+    assert PEADModel().predict("TEST", "2026-07-27", Client()).value == 1.0

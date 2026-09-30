@@ -7,10 +7,11 @@ date), rows out. Nothing here touches the network or the database.
 
 from __future__ import annotations
 
+import statistics
 from datetime import date, timedelta
 from typing import Callable, Iterable
 
-from hedge_fund.data.models import FinancialMetrics
+from hedge_fund.data.models import EarningsData, EarningsRecord, FinancialMetrics
 from hedge_fund.data.store import Fact
 
 # Candidates are tried in order, per period: companies switch concepts over
@@ -185,3 +186,69 @@ def metrics_rows(
             free_cash_flow_per_share=(cash_ops - (capex or 0.0)) / shares if cash_ops is not None and shares else None,
         ))
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Earnings events for PEAD
+# ---------------------------------------------------------------------------
+
+SUE_THRESHOLD = 1.0          # |SUE| at or above this is a BEAT / MISS
+_SUE_HISTORY = 8             # year-over-year changes used for the scale
+_SUE_MIN_HISTORY = 4
+_ANNOUNCEMENT_WINDOW = 60    # days after quarter end an 8-K item 2.02 may land
+
+
+def earnings_events(ticker: str, eps_facts: Iterable[Fact], filings: list[dict], limit: int) -> list[EarningsRecord]:
+    """Earnings surprises as standardized unexpected earnings (Bernard & Thomas 1989).
+
+    SUE = (EPS this quarter − EPS same quarter last year) / stdev of the
+    previous 4–8 such changes, from the ORIGINAL filed figures. The event is
+    dated by the earnings 8-K (item 2.02) when there is one, else by the
+    10-Q/10-K in the filing index, else by the filing that first carried the
+    EPS figure. EPS itself comes from the 10-Q/10-K XBRL, which can post a few
+    days after the 8-K; the numbers are the ones the 8-K press release
+    announced, so dating the event at the 8-K is not lookahead in substance.
+    """
+    eps_facts = list(eps_facts)
+    quarters = quarterly_values(eps_facts)
+    first_report: dict[str, tuple[str, str]] = {}
+    for fact in sorted(eps_facts, key=lambda x: x.filed, reverse=True):
+        first_report[fact.end] = (fact.form.split("/")[0], fact.filed)
+    ends = sorted(quarters)
+    changes: list[tuple[str, float]] = []
+    for end in ends:
+        prior = next((e for e in ends if 355 <= _days(e, end) <= 375), None)
+        if prior is not None:
+            changes.append((end, quarters[end] - quarters[prior]))
+
+    records: list[EarningsRecord] = []
+    for i, (end, change) in enumerate(changes):
+        history = [c for _, c in changes[max(0, i - _SUE_HISTORY):i]]
+        if len(history) < _SUE_MIN_HISTORY:
+            continue
+        scale = statistics.stdev(history)
+        if scale == 0:
+            continue
+        sue = change / scale
+        surprise = "BEAT" if sue >= SUE_THRESHOLD else "MISS" if sue <= -SUE_THRESHOLD else "MEET"
+        form, filed = _announcement(end, filings) or first_report[end]
+        records.append(EarningsRecord(
+            ticker=ticker, report_period=end, source_type=form, filing_date=filed,
+            quarterly=EarningsData(earnings_per_share=quarters[end], eps_surprise=surprise),
+        ))
+    records.sort(key=lambda r: r.report_period, reverse=True)
+    return records[:limit]
+
+
+def _announcement(end: str, filings: list[dict]) -> tuple[str, str] | None:
+    """(form, date) the quarter's results became public."""
+    releases = sorted(f["filed"] for f in filings
+                      if f["form"].startswith("8-K") and "2.02" in (f.get("items") or "")
+                      and 0 <= _days(end, f["filed"]) <= _ANNOUNCEMENT_WINDOW)
+    if releases:
+        return "8-K", releases[0]
+    reports = sorted((f["filed"], f["form"]) for f in filings
+                     if f["form"].startswith("10-") and f.get("report_date") and _near(f["report_date"], end, 3))
+    if reports:
+        return reports[0][1].split("/")[0], reports[0][0]
+    return None
