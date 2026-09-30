@@ -173,3 +173,34 @@ With years of history available, `MIN_PERIODS` returns to **4**.
 
 News and insider trades (unused by current agents); intraday data; replacing the
 LLM (it stays paid by choice); reducing LLM calls between filings (declined).
+
+## 10. Later phases (each its own spec → plan; evidence-gated)
+
+Every phase is adopted only if the baseline shows it improves post-cost,
+risk-adjusted results. All depend on this data layer.
+
+**Phase 2 — Momentum + risk sizing (free, backtestable over 10 years)**
+- `MomentumModel` (`hedge_fund/signals/momentum.py`, long/short, no LLM):
+  12-month return skipping the latest month, divided by trailing volatility,
+  squashed to [−1, 1]. Registered; library strategy `strategies/momentum.yaml`.
+  Used as its own sleeve and as a sixth voice in Fundamental L/S (gives the
+  thin short side real short evidence; stops shorting strong uptrends).
+- `BlendPolicy.sizing: conviction | inverse_vol` (default `conviction`):
+  weight ∝ conviction / 60-day annualized volatility, computed once per
+  assessment from stored prices, applied before the per-name cap.
+- Price-only sleeves get 10-year backtests from Alpaca data (no LLM cost, no
+  memorization concern).
+
+**Phase 3 — Broader universe with an LLM funnel**
+- ~100 liquid large caps (`paper_universe_100.list`).
+- `FundSpec.llm_shortlist: int | None`: quant models score the whole universe;
+  LLM agents assess only the top-N by |quant composite| plus current holdings,
+  keeping LLM cost near today's while choosing from 3× more names.
+- Shorts filtered by Alpaca `easy_to_borrow`.
+- Survivorship caveat: a present-day list flatters long backtests; a
+  point-in-time universe (top-N by dollar volume as of each date) is a
+  follow-up; until then such backtests are labelled.
+
+**Phase 4 — Insider purchases (optional)**
+- SEC Form 4 open-market purchases (transaction code P) by officers/directors,
+  clustered over 90 days, as a long-only quant signal. Sales ignored.
