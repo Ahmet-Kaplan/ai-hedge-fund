@@ -1,0 +1,43 @@
+# The Alpaca paper fund. All four library strategies, long/short, unlevered.
+# Run it with `aihf-paper` (see README "Paper trading on Alpaca").
+schema_version: 2
+name: paper-fund
+strategies:
+  - name: fundamental-ls        # all five personas, dollar-neutral
+    weight: 0.35
+    blend: {mode: dollar_neutral}
+    models:
+      - name: buffett
+      - name: munger
+      - name: graham
+      - name: lynch
+      - name: druckenmiller
+  - name: deep-value            # Graham-led, long-only
+    weight: 0.20
+    blend: {mode: long_only}
+    models:
+      - name: graham
+        weight: 2.0
+      - name: buffett
+      - name: munger
+  - name: inflections           # fundamentals rate-of-change, long/short
+    weight: 0.20
+    blend: {mode: long_short}
+    models:
+      - name: druckenmiller
+      - name: lynch
+  - name: earnings-drift        # PEAD held ~6 weeks with a fading view
+    weight: 0.25
+    blend: {mode: long_short}
+    models:
+      - name: pead
+        params: {signal_window_days: 45, decay: true}
+risk:
+  max_position_pct: 0.10        # no name above 10% of equity
+  max_gross_exposure: 1.0       # unlevered
+costs:
+  commission_bps: 5             # per side, bps of notional
+  borrow_bps_annual: 50         # general-collateral large-cap borrow
+capital: 100000
+rebalance: weekly
+benchmark: SPY

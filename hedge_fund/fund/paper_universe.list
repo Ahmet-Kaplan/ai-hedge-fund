@@ -1,0 +1,10 @@
+# Paper fund universe: liquid large caps across sectors. One or more per line; # starts a comment.
+AAPL MSFT NVDA GOOGL META AVGO ORCL   # technology / communication
+AMZN TSLA HD MCD                      # consumer discretionary
+WMT PG KO COST                        # consumer staples
+LLY UNH JNJ MRK ABBV                  # health care
+JPM BAC V GS BRK.B                    # financials
+XOM CVX                               # energy
+CAT GE                                # industrials
+NFLX DIS                              # media
+NEE                                   # utilities
