@@ -80,6 +80,9 @@ class BacktestResult:
     liquidations: list[dict] = field(default_factory=list)
     reconciliation_error: float = 0.0
     halted: str | None = None
+    net_exposure: pd.Series | None = None
+    pnl_by_symbol: dict[str, float] = field(default_factory=dict)
+    final_positions: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -91,6 +94,8 @@ class BacktestResult:
             "metrics": self.metrics, "decisions": self.decisions, "trades": self.trades,
             "rejected": self.rejected, "liquidations": self.liquidations,
             "reconciliation_error": self.reconciliation_error, "halted": self.halted,
+            "net_exposure": [round(x, 6) for x in self.net_exposure] if self.net_exposure is not None else None,
+            "pnl_by_symbol": self.pnl_by_symbol, "final_positions": self.final_positions,
         }
 
 
@@ -120,6 +125,7 @@ class SystematicBacktester:
         pending: list[OrderRequest] = []
         untradable_run: dict[str, int] = {}
         equity, exposure, decisions, trades, rejected, liquidations = [], [], [], [], [], []
+        net_exposure: list[float] = []
         last_equity = c.capital
 
         for session in all_sessions:
@@ -150,6 +156,8 @@ class SystematicBacktester:
             equity.append(eq)
             exposure.append(sum(abs(self.instruments.get(s).notional(q, marks[s])) for s, q in ledger.positions.items()) / eq
                             if eq > 0 else 0.0)
+            net_exposure.append(sum(self.instruments.get(s).notional(q, marks[s]) for s, q in ledger.positions.items()) / eq
+                                if eq > 0 else 0.0)
             last_equity = eq
 
             if session in rebalance_days and session != all_sessions[-1]:
@@ -165,6 +173,13 @@ class SystematicBacktester:
         stats["benchmark_total_return"] = metrics.total_return(bench_tr)
         stats["excess_return_vs_total_return_benchmark"] = stats["total_return"] - stats["benchmark_total_return"]
         stats["dividends"] = ledger.total("dividend")
+        # Attribution: every symbol's cash flows (trades, commissions, dividends) plus its final value.
+        pnl: dict[str, float] = {}
+        for f in ledger.flows:
+            if f.symbol:
+                pnl[f.symbol] = pnl.get(f.symbol, 0.0) + f.amount
+        for sym, q in ledger.positions.items():
+            pnl[sym] = pnl.get(sym, 0.0) + self.instruments.get(sym).notional(q, marks[sym])
         return BacktestResult(
             config_hash=c.config_hash(), strategies=[s.spec() for s in self.strategies],
             sessions=sessions, equity=eq_series, exposure=pd.Series(exposure, index=sessions),
@@ -172,6 +187,8 @@ class SystematicBacktester:
             decisions=decisions, trades=trades, rejected=rejected, liquidations=liquidations,
             reconciliation_error=ledger.reconcile(), halted=state.halted_reason or (
                 "kill switch engaged" if state.kill_switch else None),
+            net_exposure=pd.Series(net_exposure, index=sessions), pnl_by_symbol=pnl,
+            final_positions=dict(ledger.positions),
         )
 
     # ------------------------------------------------------------------

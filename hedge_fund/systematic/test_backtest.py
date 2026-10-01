@@ -176,3 +176,10 @@ def test_equity_up_to_a_date_does_not_depend_on_later_data():
     cut = SystematicBacktester(build(m, end=x), [tsmom()], config(end=x)).run()
     pd.testing.assert_series_equal(full.equity, cut.equity)
     assert full.trades == cut.trades
+
+
+def test_attribution_sums_to_total_pnl(result):
+    total = result.equity.iloc[-1] - result.equity.iloc[0]
+    assert sum(result.pnl_by_symbol.values()) == pytest.approx(total, rel=1e-9, abs=1e-6)
+    assert len(result.net_exposure) == len(result.sessions)
+    assert (result.net_exposure <= result.exposure + 1e-12).all()
