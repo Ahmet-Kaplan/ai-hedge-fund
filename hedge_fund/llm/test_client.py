@@ -611,3 +611,28 @@ def test_ordinary_call_error_without_diagnostics_preserves_failure_shape(tmp_pat
     signal = agent.predict("TEST", "2025-01-15", MockDataClient(metrics=_history()))
     assert signal.metadata == {"abstained": True, "abstain_reason": "LLM call failed: failed", "cached": False}
     assert not list(tmp_path.glob("*.json"))
+
+
+# ---------------------------------------------------------------------------
+# Local models via Ollama
+# ---------------------------------------------------------------------------
+
+def test_ollama_models_need_no_key_and_use_the_local_endpoint(monkeypatch):
+    from hedge_fund.llm.client import ChatLLM, make_llm
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    client = make_llm("qwen3:8b")
+    assert isinstance(client, ChatLLM) and client.model == "qwen3:8b"
+    assert "localhost:11434" in str(client._chat.openai_api_base)
+
+
+def test_reasoning_tags_are_stripped_from_local_model_output():
+    from hedge_fund.llm.client import ChatLLM
+
+    class Reply:
+        content = '<think>maybe {"signal": "bearish"}?</think>\n{"signal": "bullish", "confidence": 70, "reasoning": "ok"}'
+
+    class Chat:
+        def invoke(self, messages):
+            return Reply()
+
+    assert ChatLLM("qwen3:8b", Chat()).complete("s", "u").startswith('{"signal": "bullish"')

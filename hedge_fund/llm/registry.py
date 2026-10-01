@@ -27,10 +27,14 @@ PROVIDER_ENV_VARS = {
     "TypeSafe": "TYPESAFE_API_KEY",
 }
 
+# Providers that run locally and need no key (Ollama on this machine, or at
+# OLLAMA_BASE_URL).
+KEYLESS_PROVIDERS = frozenset({"Ollama"})
+
 # Providers v2 has a client for (see client.py:make_llm). Anything in the
 # registry but missing here is shown in the picker and not selectable — better
 # a greyed row than a run that dies on an id the transport rejects.
-SUPPORTED_PROVIDERS = frozenset(PROVIDER_ENV_VARS)
+SUPPORTED_PROVIDERS = frozenset(PROVIDER_ENV_VARS) | KEYLESS_PROVIDERS
 
 _FALLBACK = ("Opus 5.5", "claude-opus-5-5", "Anthropic")
 

@@ -134,24 +134,7 @@ class LLMAgent(AlphaModel):
     # ------------------------------------------------------------------
 
     def _parse(self, response: str) -> dict:
-        """Extract + validate {signal, confidence, reasoning}."""
-        data = extract_json(response)
-        signal = str(data.get("signal", "")).lower()
-        if signal not in _SIGNAL_TO_SIGN:
-            raise ValueError(f"invalid signal {data.get('signal')!r}")
-        confidence = float(data.get("confidence", 0))
-        if not 0 <= confidence <= 100:
-            raise ValueError(f"confidence out of range: {confidence}")
-        parsed = {
-            "signal": signal,
-            "confidence": confidence,
-            "reasoning": str(data.get("reasoning", "")),
-        }
-        if "provider_metadata" in data:
-            if not isinstance(data["provider_metadata"], dict):
-                raise ValueError("provider_metadata must be an object")
-            parsed["provider_metadata"] = data["provider_metadata"]
-        return parsed
+        return parse_view(response)
 
     def _to_signal(
         self,
@@ -191,3 +174,24 @@ class LLMAgent(AlphaModel):
             reasoning=f"abstained: {reason}",
             metadata={"abstained": True, "abstain_reason": reason, "cached": False},
         )
+
+
+def parse_view(response: str) -> dict:
+    """Extract + validate an agent's {signal, confidence, reasoning} answer."""
+    data = extract_json(response)
+    signal = str(data.get("signal", "")).lower()
+    if signal not in _SIGNAL_TO_SIGN:
+        raise ValueError(f"invalid signal {data.get('signal')!r}")
+    confidence = float(data.get("confidence", 0))
+    if not 0 <= confidence <= 100:
+        raise ValueError(f"confidence out of range: {confidence}")
+    parsed = {
+        "signal": signal,
+        "confidence": confidence,
+        "reasoning": str(data.get("reasoning", "")),
+    }
+    if "provider_metadata" in data:
+        if not isinstance(data["provider_metadata"], dict):
+            raise ValueError("provider_metadata must be an object")
+        parsed["provider_metadata"] = data["provider_metadata"]
+    return parsed

@@ -89,7 +89,7 @@ class ChatLLM:
     def complete(self, system: str, user: str) -> str:
         messages = [("system", system), ("human", user)]
         if self._on_token is None:
-            return _flatten(self._chat.invoke(messages).content)
+            return _strip_reasoning(_flatten(self._chat.invoke(messages).content))
 
         # Streaming chunks concatenate into the response, so they flatten
         # without a separator — the "\n" that joins whole-message blocks would
@@ -246,6 +246,15 @@ def make_llm(
             f"Supported: {', '.join(sorted(SUPPORTED_PROVIDERS))}."
         )
 
+    if provider == "Ollama":
+        # Ollama speaks the OpenAI wire format; local reasoning models can take
+        # minutes per answer, so the timeout is generous.
+        from langchain_openai import ChatOpenAI
+        chat = ChatOpenAI(
+            model=model, api_key="ollama", timeout=max(timeout, 900.0), max_retries=1,
+            base_url=os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434/v1")
+        return ChatLLM(model, chat, on_token)
+
     api_key = _require_key(provider)
 
     if provider == "TypeSafe":
@@ -315,6 +324,12 @@ def _flatten(content, sep: str = "\n") -> str:
                 parts.append(block.get("text", ""))
         return sep.join(parts)
     return "" if content is None else str(content)
+
+
+def _strip_reasoning(text: str) -> str:
+    """Drop <think>…</think> blocks that local reasoning models (Qwen, DeepSeek
+    distills) put in front of the answer; their scratch JSON would be parsed first."""
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
 def _require_key(provider: str) -> str:
