@@ -94,5 +94,6 @@ def check_orders(
     for t, q in projected.items():
         if q < -1e-9 and not shorts_ok:
             raise ValueError(f"{t}: would short without shorts enabled (margin and ${2000:,}+ equity)")
-        if t != core_ticker and equity > 0 and abs(q * marks[t]) / equity > max_name + _TOLERANCE:
+        grows = abs(q) > abs(holdings.get(t, 0.0)) + 1e-12   # a name that drifted over the cap may be held, not added to
+        if grows and t != core_ticker and equity > 0 and abs(q * marks[t]) / equity > max_name + _TOLERANCE:
             raise ValueError(f"{t}: would be {abs(q * marks[t]) / equity:.1%} of the account (max {max_name:.0%})")
