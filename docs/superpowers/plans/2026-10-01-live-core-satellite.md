@@ -549,7 +549,7 @@ def test_buys_scaled_to_available_cash_not_sale_proceeds():
     orders = plan({"SPY": 1.0}, 10.0, {"SPY": 0.5, "NVDA": 0.5})
     sells = [o for o in orders if o.side == "sell"]
     buys = [o for o in orders if o.side == "buy"]
-    assert sells == [PlannedOrder(ticker="SPY", side="sell", qty=pytest.approx(0.49))]
+    assert [(o.ticker, o.qty) for o in sells] == [("SPY", pytest.approx(0.49))]
     assert buys == [PlannedOrder(ticker="NVDA", side="buy", dollars=10.0)]
 
 
