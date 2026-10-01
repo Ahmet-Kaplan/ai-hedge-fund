@@ -139,3 +139,12 @@ def test_reconcile_halts_a_trailing_satellite(env):
     reconcile_live(LiveSettings(agent_share=0.2), FakeLive(holdings={"NVDA": 1.0}), FakeDataClient(closes), live,
                    session="2026-08-21")
     assert live.satellite_halted()
+
+
+def test_core_only_run_ignores_unpriceable_paper_names(env):
+    env["live"].mark_dry_run_done()
+    env["paper"].write_plan("2026-08-24", {"plan": {"decision": {"final_weights": {"ZZZ": 0.05}}}})
+    client = FakeLive(cash=100.0)
+    result = run(env, client, cash_buffer_pct=0.0)            # share 0: ZZZ has no price, and needs none
+    assert result.status == "submitted"
+    assert client.sent == [("SPY", "buy", {"notional": 100.0})]

@@ -119,7 +119,10 @@ def submit_live(
     paper_weights, paper_session, fresh = latest_paper_weights(paper, session, settings.stale_plan_days)
     share = 0.0 if ledger.satellite_halted() else settings.agent_share
     core = settings.core_ticker
-    names = sorted(set(holdings) | set(paper_weights) | {core} | set(_last_fresh_satellite(ledger)))
+    # Price the paper fund's names only when the satellite can hold them: a core-only
+    # run must not fail because some paper name lacks a close.
+    wanted = (set(paper_weights) | set(_last_fresh_satellite(ledger))) if share > 0 else set()
+    names = sorted(set(holdings) | {core} | wanted)
     marks = exact_marks(names, mark_day, data_client)
     equity = cash + sum(q * marks[t] for t, q in holdings.items())
     shorts_ok = settings.shorts_enabled and equity >= settings.short_min_equity
