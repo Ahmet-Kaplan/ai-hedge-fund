@@ -1,0 +1,150 @@
+{
+ "breakout": {
+  "development_round_trip_expectancy_bps": -195.01358460210113,
+  "economics_filtered": {
+   "average_cash_share": 1.0,
+   "average_invested_capital": 0.0,
+   "costs_pct_of_average_equity": 0.0,
+   "fills": 0,
+   "final_value": 200.0,
+   "max_drawdown": -0.0,
+   "max_positions_held": 5,
+   "orders_dropped_as_uneconomic": 77,
+   "orders_rejected_by_execution": 0,
+   "probability_of_ruin_1y": 0.0,
+   "rejection_reasons": [],
+   "sharpe": 0.0,
+   "total_return": 0.0,
+   "transaction_costs": 0.0
+  },
+  "raw": {
+   "average_cash_share": 0.953870982675999,
+   "average_invested_capital": 5.666783988546121,
+   "costs_pct_of_average_equity": 1.3535308114697822,
+   "fills": 146,
+   "final_value": 40.91019766328417,
+   "max_drawdown": 0.7954490116835792,
+   "max_positions_held": 5,
+   "orders_dropped_as_uneconomic": 0,
+   "orders_rejected_by_execution": 0,
+   "probability_of_ruin_1y": 0.0,
+   "rejection_reasons": [],
+   "sharpe": -3.177571366448156,
+   "total_return": -0.7954490116835792,
+   "transaction_costs": 149.36564220011576
+  }
+ },
+ "meanrev": {
+  "development_round_trip_expectancy_bps": -63.61443936753279,
+  "economics_filtered": {
+   "average_cash_share": 1.0,
+   "average_invested_capital": 0.0,
+   "costs_pct_of_average_equity": 0.0,
+   "fills": 0,
+   "final_value": 200.0,
+   "max_drawdown": -0.0,
+   "max_positions_held": 10,
+   "orders_dropped_as_uneconomic": 1424,
+   "orders_rejected_by_execution": 0,
+   "probability_of_ruin_1y": 0.0,
+   "rejection_reasons": [],
+   "sharpe": 0.0,
+   "total_return": 0.0,
+   "transaction_costs": 0.0
+  },
+  "raw": {
+   "average_cash_share": 0.9197274910455406,
+   "average_invested_capital": 7.267206864926695,
+   "costs_pct_of_average_equity": 25.900212198498796,
+   "fills": 210,
+   "final_value": -3.996285130405291,
+   "max_drawdown": 1.0199814256520265,
+   "max_positions_held": 10,
+   "orders_dropped_as_uneconomic": 0,
+   "orders_rejected_by_execution": 16,
+   "probability_of_ruin_1y": 0.884,
+   "rejection_reasons": [
+    "insufficient cash"
+   ],
+   "sharpe": -0.3410701455410864,
+   "total_return": -1.0199814256520265,
+   "transaction_costs": 211.92877308040528
+  }
+ },
+ "tsmom": {
+  "development_round_trip_expectancy_bps": 1050.2896553438363,
+  "economics_filtered": {
+   "average_cash_share": 0.144463616240891,
+   "average_invested_capital": 209.94238407613224,
+   "costs_pct_of_average_equity": 0.5340905633601825,
+   "fills": 127,
+   "final_value": 230.08479956017288,
+   "max_drawdown": 0.3412537778981456,
+   "max_positions_held": 10,
+   "orders_dropped_as_uneconomic": 488,
+   "orders_rejected_by_execution": 12,
+   "probability_of_ruin_1y": 0.0002,
+   "rejection_reasons": [
+    "insufficient cash"
+   ],
+   "sharpe": 0.20815167553200112,
+   "total_return": 0.15042399780086435,
+   "transaction_costs": 130.44817384282717
+  },
+  "raw": {
+   "average_cash_share": 0.5552231881980187,
+   "average_invested_capital": 40.22557593454658,
+   "costs_pct_of_average_equity": 6.125591307312279,
+   "fills": 243,
+   "final_value": -5.951161134781804,
+   "max_drawdown": 1.0297558056739091,
+   "max_positions_held": 10,
+   "orders_dropped_as_uneconomic": 0,
+   "orders_rejected_by_execution": 64,
+   "probability_of_ruin_1y": 0.803,
+   "rejection_reasons": [
+    "insufficient cash"
+   ],
+   "sharpe": -0.42146368031314796,
+   "total_return": -1.0297558056739091,
+   "transaction_costs": 243.95956809978188
+  }
+ },
+ "xsmom": {
+  "development_round_trip_expectancy_bps": 1153.256075363181,
+  "economics_filtered": {
+   "average_cash_share": 0.25032536084592594,
+   "average_invested_capital": 160.44251897533144,
+   "costs_pct_of_average_equity": 0.692035040804339,
+   "fills": 144,
+   "final_value": 192.97760453233502,
+   "max_drawdown": 0.37523104817159403,
+   "max_positions_held": 5,
+   "orders_dropped_as_uneconomic": 286,
+   "orders_rejected_by_execution": 0,
+   "probability_of_ruin_1y": 0.0002,
+   "rejection_reasons": [],
+   "sharpe": 0.06770895265046735,
+   "total_return": -0.03511197733832494,
+   "transaction_costs": 148.30909961266485
+  },
+  "raw": {
+   "average_cash_share": 0.3676642883547041,
+   "average_invested_capital": 47.85703562351948,
+   "costs_pct_of_average_equity": 4.396201448640649,
+   "fills": 256,
+   "final_value": -7.796633623462215,
+   "max_drawdown": 1.0389831681173112,
+   "max_positions_held": 5,
+   "orders_dropped_as_uneconomic": 0,
+   "orders_rejected_by_execution": 8,
+   "probability_of_ruin_1y": 1.0,
+   "rejection_reasons": [
+    "insufficient cash"
+   ],
+   "sharpe": -0.5728882445356452,
+   "total_return": -1.0389831681173112,
+   "transaction_costs": 257.92899780846216
+  }
+ }
+}

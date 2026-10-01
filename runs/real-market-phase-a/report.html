@@ -1,0 +1,154 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Phase A real-market research</title>
+<style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#d2d2d7;--head:#f5f5f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f2;--muted:#a1a1a6;--line:#3a3a3c;--head:#1f1f22}}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;margin:0;padding:24px 16px;max-width:1200px;margin:auto}
+table{border-collapse:collapse;display:block;overflow-x:auto;margin:12px 0;font-size:13px}
+th,td{border:1px solid var(--line);padding:4px 8px;text-align:right;white-space:nowrap}
+th{background:var(--head)} td:first-child,th:first-child{text-align:left}
+code{font-size:12px} h2{margin-top:32px;border-bottom:1px solid var(--line)} p,li{color:var(--fg)}
+</style></head><body>
+<h1>Phase A — real-market evidence for four frozen reference strategies</h1>
+<p>Pre-registration hash <code>b37d3f1b31a356e7…</code> (committed before any backtest). Research and simulation only; no live trading. Figures are simulated, net of modelled costs, and not a promise of future returns.</p>
+<h2>Summary table (development period unless stated)</h2>
+<table>
+<tr><th>Strategy</th><th>CAGR</th><th>Sharpe</th><th>Max DD</th><th>Trades</th><th>Costs</th><th>DSR</th><th>PBO</th><th>€200 Final (raw / filtered)</th><th>Holdout</th><th>Status</th></tr>
+<tr><td>breakout</td><td>-1.6%</td><td>-0.58</td><td>12.4%</td><td>77</td><td>$796</td><td>0.00</td><td>0.67</td><td>40.91 / 200.00</td><td>FAIL</td><td><strong>REJECT</strong></td></tr>
+<tr><td>meanrev</td><td>8.8%</td><td>0.54</td><td>27.1%</td><td>1336</td><td>$7,598</td><td>0.43</td><td>0.67</td><td>0.00 (ruined) / 200.00</td><td>PASS</td><td><strong>INSUFFICIENT_EVIDENCE</strong></td></tr>
+<tr><td>tsmom</td><td>10.9%</td><td>0.63</td><td>30.3%</td><td>536</td><td>$1,130</td><td>0.51</td><td>0.67</td><td>0.00 (ruined) / 230.08</td><td>PASS</td><td><strong>INSUFFICIENT_EVIDENCE</strong></td></tr>
+<tr><td>xsmom</td><td>9.5%</td><td>0.57</td><td>32.4%</td><td>330</td><td>$1,143</td><td>0.46</td><td>0.67</td><td>0.00 (ruined) / 192.98</td><td>FAIL</td><td><strong>REJECT</strong></td></tr>
+</table>
+<p>Benchmark SPY total return, development: CAGR 11.8%, Sharpe 0.67, max DD 33.7%. Trades = closed round trips. DSR uses n_trials = 4; PBO is computed once for the family of four strategies.</p>
+<h2>Setup</h2>
+<ul>
+<li>Universe: runs/buffett-baseline/universe_top10.json — survivorship-aware PIT top-10 by market cap, annual reconstitution 2016-07-01..2025-07-01; membership = latest snapshot on or before the session.</li>
+<li>Development 2016-07-01 → 2022-12-30; embargo 30 days; locked holdout 2023-02-01 → 2026-06-30 (evaluated once per strategy).</li>
+<li>Benchmark: SPY total return (dividends reinvested) — the portfolio is credited dividends. Risk-free rate: 0 (no rate series in the cache); Sharpe is excess over zero.</li>
+<li>Execution: next_open — orders decided on session D&#x27;s close fill at D+1&#x27;s open. Costs: commission 1.0 bp, half-spread 2.0 bp, square-root impact coef 0.1, max 5% of ADV.</li>
+<li>Portfolio: long-only, inverse-volatility, gross 100%, max 20% per name; operational breakers off (measure the strategies&#x27; own behaviour; operational breakers (drawdown halt, daily loss, vol target) are switched off so they cannot mask or create an edge).</li>
+<li>Strategy configs: code defaults, frozen and hashed: breakout <code>b13d865ab364ee11</code> (weekly), meanrev <code>5775739dba617f29</code> (weekly), tsmom <code>f23a4d3fb5b1ee22</code> (monthly), xsmom <code>4d7783bca536dc8b</code> (monthly).</li>
+</ul>
+<h2>Data inventory</h2>
+<ul>
+<li>22 instruments (SPY + 21 universe names), 2512 sessions 2016-07-01 → 2026-06-30; Tiingo requests during inventory: 0.</li>
+<li>No missing sessions, closes or volumes during any name&#x27;s membership; every name is 100% complete.</li>
+<li>Dividends present for all payers; BRK.B, AMZN, TSLA paid none. Splits covered (AAPL, GOOGL, AMZN, NVDA×2, TSLA×2, AVGO, T, GE). GE&#x27;s 2023/2024 spin-offs are encoded by the vendor as split factors 1.281 and 1.253 (value-preserving restatement, not true splits).</li>
+<li>Delisting coverage: no universe member stopped trading in the window, so delisting handling was not exercised by this universe (survivorship-aware membership, but megacaps did not delist).</li>
+</ul>
+<h2>Development results</h2>
+<table>
+<tr><th>Strategy</th><th>Total</th><th>CAGR</th><th>Vol</th><th>Sharpe</th><th>Sortino</th><th>Calmar</th><th>Max DD</th><th>Hit</th><th>Payoff</th><th>PF</th><th>Expectancy</th><th>Turnover/yr</th><th>Costs</th><th>Slippage</th><th>Hold (sessions)</th><th>Gross</th><th>Net</th></tr>
+<tr><td>breakout</td><td>-9.9%</td><td>-1.6%</td><td>2.7%</td><td>-0.58</td><td>-0.73</td><td>-0.13</td><td>12.4%</td><td>48.1%</td><td>0.31</td><td>0.28</td><td>-378</td><td>4.24</td><td>$796</td><td>$534</td><td>9</td><td>4%</td><td>4%</td></tr>
+<tr><td>meanrev</td><td>72.7%</td><td>8.8%</td><td>18.9%</td><td>0.54</td><td>0.78</td><td>0.32</td><td>27.1%</td><td>55.9%</td><td>0.92</td><td>1.17</td><td>32</td><td>25.13</td><td>$7,598</td><td>$5,105</td><td>14</td><td>59%</td><td>59%</td></tr>
+<tr><td>tsmom</td><td>95.8%</td><td>10.9%</td><td>19.5%</td><td>0.63</td><td>0.88</td><td>0.36</td><td>30.3%</td><td>62.7%</td><td>0.98</td><td>1.64</td><td>109</td><td>3.62</td><td>$1,130</td><td>$758</td><td>143</td><td>87%</td><td>87%</td></tr>
+<tr><td>xsmom</td><td>80.2%</td><td>9.5%</td><td>19.2%</td><td>0.57</td><td>0.80</td><td>0.29</td><td>32.4%</td><td>63.9%</td><td>0.75</td><td>1.33</td><td>100</td><td>3.72</td><td>$1,143</td><td>$766</td><td>124</td><td>74%</td><td>74%</td></tr>
+</table>
+<p>SPY total return over the same window: 104.6%.</p>
+<h3>Exposure to the market (post-hoc, descriptive — not used for classification)</h3>
+<table>
+<tr><th>Strategy</th><th>Beta vs SPY TR</th><th>Correlation</th><th>Alpha / yr</th><th>Alpha t-stat</th></tr>
+<tr><td>breakout</td><td>0.02</td><td>0.14</td><td>-1.83%</td><td>-1.74</td></tr>
+<tr><td>meanrev</td><td>0.85</td><td>0.87</td><td>-0.76%</td><td>-0.20</td></tr>
+<tr><td>tsmom</td><td>0.91</td><td>0.90</td><td>0.50%</td><td>0.15</td></tr>
+<tr><td>xsmom</td><td>0.87</td><td>0.88</td><td>-0.34%</td><td>-0.09</td></tr>
+</table>
+<p>The three strategies with positive Sharpe are mostly long-only exposure to the same megacaps as the benchmark (beta 0.85–0.91); their alpha is indistinguishable from zero.</p>
+<h3>Per year (net return vs SPY total return)</h3>
+<table>
+<tr><th>Year</th><th>breakout</th><th>meanrev</th><th>tsmom</th><th>xsmom</th><th>SPY TR</th></tr>
+<tr><td>2016</td><td>0.0%</td><td>5.3%</td><td>-1.4%</td><td>-1.1%</td><td>7.7%</td></tr>
+<tr><td>2017</td><td>1.1%</td><td>16.2%</td><td>30.1%</td><td>25.3%</td><td>21.7%</td></tr>
+<tr><td>2018</td><td>-4.7%</td><td>8.0%</td><td>0.6%</td><td>0.8%</td><td>-4.6%</td></tr>
+<tr><td>2019</td><td>-2.6%</td><td>18.7%</td><td>19.1%</td><td>19.0%</td><td>31.2%</td></tr>
+<tr><td>2020</td><td>-1.6%</td><td>18.0%</td><td>26.5%</td><td>29.8%</td><td>18.4%</td></tr>
+<tr><td>2021</td><td>0.1%</td><td>14.9%</td><td>24.0%</td><td>25.1%</td><td>28.7%</td></tr>
+<tr><td>2022</td><td>-2.5%</td><td>-18.9%</td><td>-18.8%</td><td>-25.3%</td><td>-18.2%</td></tr>
+</table>
+<h3>Per regime (SimpleRegime at each decision; annualized mean daily return)</h3>
+<ul>
+<li><strong>breakout</strong>: up/low/risk-on (996d): -0.9%, Sharpe -0.30; down/high/risk-off (226d): 0.3%, Sharpe 0.24; up/high/risk-on (180d): -8.2%, Sharpe -2.64; range/high/risk-on (91d): 0.4%, Sharpe 0.29; down/low/risk-off (53d): 0.8%, Sharpe 2.18</li>
+<li><strong>meanrev</strong>: up/low/risk-on (996d): 10.4%, Sharpe 1.01; down/high/risk-off (226d): 4.7%, Sharpe 0.13; up/high/risk-on (180d): 8.9%, Sharpe 0.61; range/high/risk-on (91d): -36.4%, Sharpe -1.39; down/low/risk-off (53d): 16.4%, Sharpe 0.59</li>
+<li><strong>tsmom</strong>: up/low/risk-on (973d): 17.4%, Sharpe 1.24; down/high/risk-off (209d): 17.6%, Sharpe 0.49; up/high/risk-on (143d): -7.2%, Sharpe -0.35; range/high/risk-on (124d): -25.6%, Sharpe -1.07; range/low/risk-on (81d): 45.8%, Sharpe 3.88</li>
+<li><strong>xsmom</strong>: up/low/risk-on (973d): 16.9%, Sharpe 1.16; down/high/risk-off (209d): 19.1%, Sharpe 0.58; up/high/risk-on (143d): -7.3%, Sharpe -0.40; range/high/risk-on (124d): -30.6%, Sharpe -1.15; range/low/risk-on (81d): 36.3%, Sharpe 2.96</li>
+</ul>
+<h3>Largest drawdowns</h3>
+<ul>
+<li><strong>breakout</strong>: -12.4% 2017-06-08→2022-07-18 (recovered not by end); -1.1% 2017-05-16→2017-05-17 (recovered 2017-06-02); -0.8% 2016-07-19→2016-11-30 (recovered 2016-12-13)</li>
+<li><strong>meanrev</strong>: -27.1% 2020-02-06→2020-03-23 (recovered 2020-07-31); -24.7% 2021-11-08→2022-11-03 (recovered not by end); -15.1% 2018-10-04→2018-12-24 (recovered 2019-03-28)</li>
+<li><strong>tsmom</strong>: -30.3% 2020-02-19→2020-03-23 (recovered 2020-07-06); -23.0% 2022-01-04→2022-10-12 (recovered not by end); -21.3% 2018-09-20→2018-12-24 (recovered 2019-12-26)</li>
+<li><strong>xsmom</strong>: -32.4% 2021-11-24→2022-10-12 (recovered not by end); -24.9% 2020-02-19→2020-03-23 (recovered 2020-06-10); -21.6% 2018-09-04→2018-12-24 (recovered 2019-12-26)</li>
+</ul>
+<h3>Contribution by instrument (P&amp;L in $, development)</h3>
+<ul>
+<li><strong>breakout</strong>: top AAPL -18, AMZN -1,508, BAC -344, BRK.B -2,690; bottom UNH -178, V -2,003, XOM -1,361</li>
+<li><strong>meanrev</strong>: top AAPL +404, AMZN +10,060, BAC +4,666, BRK.B +3,258; bottom V +4,780, WFC -23, XOM -13,806</li>
+<li><strong>tsmom</strong>: top AAPL +29,231, AMZN +25,905, BAC -1,222, BRK.B +10,606; bottom V -1,962, WFC -474, XOM -2,372</li>
+<li><strong>xsmom</strong>: top AAPL +26,989, AMZN +29,399, BAC -1,486, BRK.B -6,684; bottom UNH -613, V -1,661, XOM -1,609</li>
+</ul>
+<h2>Validation (development only)</h2>
+<table>
+<tr><th>Strategy</th><th>WF positive years</th><th>Purged k-fold Sharpe (min / mean)</th><th>CPCV share positive</th><th>PSR</th><th>DSR</th><th>PBO</th><th>Bootstrap Sharpe 95% CI (daily)</th><th>MC max DD p95</th><th>Gates</th></tr>
+<tr><td>breakout</td><td>33%</td><td>-2.12 / -0.84</td><td>20%</td><td>0.06</td><td>0.00</td><td>0.67</td><td>[-0.0810, 0.0130]</td><td>32.7%</td><td>FAIL: bootstrap, deflated_sharpe, oos_sharpe, pbo, walk_forward</td></tr>
+<tr><td>meanrev</td><td>83%</td><td>-0.46 / 0.94</td><td>93%</td><td>0.91</td><td>0.43</td><td>0.67</td><td>[-0.0018, 0.0774]</td><td>36.4%</td><td>FAIL: bootstrap, deflated_sharpe, max_drawdown, pbo</td></tr>
+<tr><td>tsmom</td><td>83%</td><td>-0.80 / 0.78</td><td>87%</td><td>0.94</td><td>0.51</td><td>0.67</td><td>[-0.0025, 0.0886]</td><td>10.6%</td><td>FAIL: bootstrap, deflated_sharpe, max_drawdown, pbo</td></tr>
+<tr><td>xsmom</td><td>83%</td><td>-1.12 / 0.80</td><td>80%</td><td>0.93</td><td>0.46</td><td>0.67</td><td>[-0.0053, 0.0815]</td><td>21.5%</td><td>FAIL: bootstrap, deflated_sharpe, max_drawdown, pbo</td></tr>
+</table>
+<p>Gates: <code>configs/validation-gates.yaml</code> (hash 2fc90f4ad972f482). No gate was changed.</p>
+<h2>Locked holdout (2023-02-01 → 2026-06-30, evaluated once)</h2>
+<table>
+<tr><th>Strategy</th><th>Total</th><th>CAGR</th><th>Sharpe</th><th>Max DD</th><th>Round trips</th><th>Costs</th><th>SPY TR</th><th>Pass</th></tr>
+<tr><td>breakout</td><td>2.0%</td><td>0.6%</td><td>0.15</td><td>5.3%</td><td>58</td><td>$634</td><td>90.1%</td><td>FAIL</td></tr>
+<tr><td>meanrev</td><td>88.5%</td><td>20.6%</td><td>1.23</td><td>22.1%</td><td>669</td><td>$3,684</td><td>90.1%</td><td>PASS</td></tr>
+<tr><td>tsmom</td><td>80.1%</td><td>19.0%</td><td>1.11</td><td>20.9%</td><td>270</td><td>$470</td><td>90.1%</td><td>PASS</td></tr>
+<tr><td>xsmom</td><td>97.5%</td><td>22.2%</td><td>1.05</td><td>25.4%</td><td>180</td><td>$687</td><td>90.1%</td><td>FAIL</td></tr>
+</table>
+<p>Criterion (pre-registered): Sharpe ≥ 0.5, max DD ≤ 25%, total return &gt; 0. It does not require beating the benchmark; none of the strategies clearly did.</p>
+<h2>Cost stress (development)</h2>
+<table>
+<tr><th>Strategy</th><th>Sharpe 1×</th><th>1.5×</th><th>2×</th><th>3×</th><th>Total return 1× → 3×</th><th>Fragile</th></tr>
+<tr><td>breakout</td><td>-0.58</td><td>-0.61</td><td>-0.63</td><td>-0.68</td><td>-9.9% → -11.5%</td><td>yes</td></tr>
+<tr><td>meanrev</td><td>0.54</td><td>0.52</td><td>0.50</td><td>0.46</td><td>72.7% → 55.7%</td><td>no</td></tr>
+<tr><td>tsmom</td><td>0.63</td><td>0.63</td><td>0.62</td><td>0.62</td><td>95.8% → 93.4%</td><td>no</td></tr>
+<tr><td>xsmom</td><td>0.57</td><td>0.57</td><td>0.57</td><td>0.56</td><td>80.2% → 78.1%</td><td>no</td></tr>
+</table>
+<h2>€200 account (development)</h2>
+<table>
+<tr><th>Strategy</th><th>Variant</th><th>Final</th><th>Max DD</th><th>Fills</th><th>Rejected (exec)</th><th>Dropped uneconomic</th><th>Avg invested</th><th>Cash share</th><th>Costs</th><th>Costs / avg equity</th><th>P(ruin, 1y)</th></tr>
+<tr><td>breakout</td><td>raw</td><td>40.91</td><td>79.5%</td><td>146</td><td>0</td><td>0</td><td>5.67</td><td>95%</td><td>149.37</td><td>135%</td><td>0.0%</td></tr>
+<tr><td>breakout</td><td>economics_filtered</td><td>200.00</td><td>-0.0%</td><td>0</td><td>0</td><td>77</td><td>0.00</td><td>100%</td><td>0.00</td><td>0%</td><td>0.0%</td></tr>
+<tr><td>meanrev</td><td>raw</td><td>0.00 (ruined)</td><td>100.0%</td><td>210</td><td>16</td><td>0</td><td>7.27</td><td>92%</td><td>211.93</td><td>2590%</td><td>88.4%</td></tr>
+<tr><td>meanrev</td><td>economics_filtered</td><td>200.00</td><td>-0.0%</td><td>0</td><td>0</td><td>1424</td><td>0.00</td><td>100%</td><td>0.00</td><td>0%</td><td>0.0%</td></tr>
+<tr><td>tsmom</td><td>raw</td><td>0.00 (ruined)</td><td>100.0%</td><td>243</td><td>64</td><td>0</td><td>40.23</td><td>56%</td><td>243.96</td><td>613%</td><td>80.3%</td></tr>
+<tr><td>tsmom</td><td>economics_filtered</td><td>230.08</td><td>34.1%</td><td>127</td><td>12</td><td>488</td><td>209.94</td><td>14%</td><td>130.45</td><td>53%</td><td>0.0%</td></tr>
+<tr><td>xsmom</td><td>raw</td><td>0.00 (ruined)</td><td>100.0%</td><td>256</td><td>8</td><td>0</td><td>47.86</td><td>37%</td><td>257.93</td><td>440%</td><td>100.0%</td></tr>
+<tr><td>xsmom</td><td>economics_filtered</td><td>192.98</td><td>37.5%</td><td>144</td><td>0</td><td>286</td><td>160.44</td><td>25%</td><td>148.31</td><td>69%</td><td>0.0%</td></tr>
+</table>
+<p>The €1 minimum commission per order dominates: rebalancing a 200-unit account into several names means orders of a few to a few dozen units, where €1 is 2–50% of the order. Unfiltered, every strategy lost the whole account. With the economics filter, orders whose estimated edge did not cover costs were skipped; breakout and meanrev then never traded, tsmom ended at 230 (+15% over 6.5 years) and xsmom at 193. The filter&#x27;s edge estimate (development round-trip expectancy, bp) includes market beta, so it overstates true edge. Results were simulated at €200 directly, not scaled from $100k.</p>
+<p>Simulator finding: the raw small-account runs ended slightly below zero because commissions were still charged on tiny sells when cash was exhausted. The report treats these as ruined (0); the cash floor should be enforced in the ledger before any small-account paper trading.</p>
+<h2>Classification (pre-registered rules, unchanged)</h2>
+<ul>
+<li><strong>breakout — REJECT</strong>: development Sharpe -0.58; gates fail (bootstrap, deflated_sharpe, oos_sharpe, pbo, walk_forward); holdout fail; fragile to costs: yes.</li>
+<li><strong>meanrev — INSUFFICIENT_EVIDENCE</strong>: development Sharpe 0.54; gates fail (bootstrap, deflated_sharpe, max_drawdown, pbo); holdout pass; fragile to costs: no.</li>
+<li><strong>tsmom — INSUFFICIENT_EVIDENCE</strong>: development Sharpe 0.63; gates fail (bootstrap, deflated_sharpe, max_drawdown, pbo); holdout pass; fragile to costs: no.</li>
+<li><strong>xsmom — REJECT</strong>: development Sharpe 0.57; gates fail (bootstrap, deflated_sharpe, max_drawdown, pbo); holdout fail; fragile to costs: no.</li>
+</ul>
+<p>Ensemble: not run — fewer than two strategies are EVIDENCE_SUPPORTS_FURTHER_RESEARCH.</p>
+<h2>Audit</h2>
+<ul>
+<li>Financial Datasets clients constructed: 0; Tiingo requests: 0 (offline store); live broker modules loaded: 0.</li>
+<li>Look-ahead violations (fill session not after decision session): 0.</li>
+<li>Pre-registration committed at 2026-10-01T09:20:11Z (commit aa05bc1); holdout evaluated at 09:27:38, 09:27:54, 09:28:05, 09:28:14 UTC, once per strategy.</li>
+<li>Config hashes match the pre-registration: True; no parameter was changed before or after the holdout.</li>
+<li>Experiment registry verified (hash chain): True; distinct trials in family: 4.</li>
+<li>No secrets printed or stored; <code>main</code> unchanged.</li>
+</ul>
+<h2>Caveats</h2>
+<ul>
+<li>Small universe (10 megacaps at a time); results do not generalise to broader or less liquid markets.</li>
+<li>Rebalance cadence per strategy was a pre-registered choice; other cadences were not tried (by design).</li>
+<li>Risk-free rate set to 0; Sharpe ratios are slightly overstated relative to excess-of-cash Sharpe.</li>
+<li>PBO is a family-level statistic over these four strategies, not a per-strategy probability.</li>
+<li>The holdout criterion does not include a benchmark comparison; holdout passes therefore do not imply outperformance.</li>
+</ul>
+</body></html>

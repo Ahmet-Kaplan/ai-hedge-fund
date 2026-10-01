@@ -1,0 +1,654 @@
+{
+ "ensemble": {
+  "reason": "fewer than two strategies are EVIDENCE_SUPPORTS_FURTHER_RESEARCH",
+  "run": false
+ },
+ "holdout": {
+  "breakout": {
+   "benchmark_total_return": 0.9012903413751834,
+   "cagr": 0.00577175297067245,
+   "final_equity": 101969.50362506186,
+   "max_drawdown": 0.052936549557996426,
+   "passed": false,
+   "round_trips": 58,
+   "sharpe": 0.1467282473860332,
+   "sortino": 0.20561001810036134,
+   "total_return": 0.019695036250618525,
+   "transaction_costs": 634.3573749381327
+  },
+  "meanrev": {
+   "benchmark_total_return": 0.9012903413751834,
+   "cagr": 0.20565422375104925,
+   "final_equity": 188475.519638337,
+   "max_drawdown": 0.22120257203167704,
+   "passed": true,
+   "round_trips": 669,
+   "sharpe": 1.228298035417391,
+   "sortino": 1.8300005768346173,
+   "total_return": 0.88475519638337,
+   "transaction_costs": 3683.537761663055
+  },
+  "tsmom": {
+   "benchmark_total_return": 0.9012903413751834,
+   "cagr": 0.18961481215460374,
+   "final_equity": 180112.47159231067,
+   "max_drawdown": 0.20894360633585585,
+   "passed": true,
+   "round_trips": 270,
+   "sharpe": 1.1065428547081995,
+   "sortino": 1.6452667953514926,
+   "total_return": 0.8011247159231067,
+   "transaction_costs": 469.6092076893177
+  },
+  "xsmom": {
+   "benchmark_total_return": 0.9012903413751834,
+   "cagr": 0.22234281886381568,
+   "final_equity": 197463.79306207737,
+   "max_drawdown": 0.254117309721978,
+   "passed": false,
+   "round_trips": 180,
+   "sharpe": 1.0499275777689774,
+   "sortino": 1.588476802519893,
+   "total_return": 0.9746379306207738,
+   "transaction_costs": 686.9630379226003
+  }
+ },
+ "status": {
+  "breakout": "REJECT",
+  "meanrev": "INSUFFICIENT_EVIDENCE",
+  "tsmom": "INSUFFICIENT_EVIDENCE",
+  "xsmom": "REJECT"
+ },
+ "strategies": {
+  "breakout": {
+   "contribution_by_instrument": {
+    "AAPL": -18.16130237417957,
+    "AMZN": -1508.4812538159738,
+    "BAC": -344.0871640568894,
+    "BRK.B": -2689.685920445218,
+    "GE": -69.50384998025345,
+    "GOOGL": -1619.2169621329817,
+    "JNJ": 0.922698008475016,
+    "JPM": 168.93830097082594,
+    "META": -1885.2035738544785,
+    "MSFT": -707.7773617797685,
+    "NVDA": 2556.736284719475,
+    "T": -264.9862919727818,
+    "UNH": -177.94091129004363,
+    "V": -2003.280364962817,
+    "XOM": -1361.2047225470405
+   },
+   "development": {
+    "annualized_volatility": 0.026974758794148398,
+    "average_holding_sessions": 9.363636363636363,
+    "average_loss": -1015.1620819733371,
+    "average_win": 311.39572156034586,
+    "benchmark_total_return": 1.0462795315751339,
+    "cagr": -0.015968412945140398,
+    "calmar": -0.1288999530472416,
+    "commissions": 261.89770207000004,
+    "cvar_5": 0.004353257806734771,
+    "dividends": 550.8199999999999,
+    "excess_return_vs_total_return_benchmark": -1.1455088555302702,
+    "expectancy": -377.7252153402687,
+    "exposure": 0.04487088899155828,
+    "fills": 145,
+    "final_equity": 90077.06760448636,
+    "gross_exposure_mean": 0.04487088899155828,
+    "hit_rate": 0.4805194805194805,
+    "liquidations": 0,
+    "max_drawdown": 0.12388222468388332,
+    "n_trades": 77.0,
+    "net_exposure_mean": 0.04487088899155828,
+    "payoff_ratio": 0.3067448312835276,
+    "profit_factor": 0.283738968937263,
+    "reconciliation_error": -4.3655745685100555e-11,
+    "rejected_orders": 0,
+    "round_trips": 77,
+    "sharpe": -0.5832158862181708,
+    "slippage": 533.8339934436416,
+    "sortino": -0.7328827487430886,
+    "total_return": -0.0992293239551364,
+    "transaction_costs": 795.7316955136416,
+    "turnover": 4.2428187022071135
+   },
+   "drawdown_periods": [
+    {
+     "depth": -0.12388222468388332,
+     "recovered": null,
+     "start": "2017-06-08",
+     "trough": "2022-07-18"
+    },
+    {
+     "depth": -0.011055500084261927,
+     "recovered": "2017-06-02",
+     "start": "2017-05-16",
+     "trough": "2017-05-17"
+    },
+    {
+     "depth": -0.007676246481476912,
+     "recovered": "2016-12-13",
+     "start": "2016-07-19",
+     "trough": "2016-11-30"
+    }
+   ],
+   "per_regime": {
+    "down/high/risk-off": {
+     "annualized_return": 0.0025155547307610195,
+     "days": 226,
+     "sharpe": 0.23775974596075322
+    },
+    "down/low/risk-off": {
+     "annualized_return": 0.008128295033137611,
+     "days": 53,
+     "sharpe": 2.1805313529348935
+    },
+    "down/low/risk-on": {
+     "annualized_return": -0.4103436772162179,
+     "days": 5,
+     "sharpe": null
+    },
+    "range/high/risk-off": {
+     "annualized_return": -0.007996125813000375,
+     "days": 23,
+     "sharpe": -0.6036931956609373
+    },
+    "range/high/risk-on": {
+     "annualized_return": 0.004474129890473372,
+     "days": 91,
+     "sharpe": 0.29387269703826546
+    },
+    "range/low/risk-off": {
+     "annualized_return": -0.016067221058224668,
+     "days": 10,
+     "sharpe": null
+    },
+    "range/low/risk-on": {
+     "annualized_return": -0.014088447602784833,
+     "days": 52,
+     "sharpe": -1.8201795088210158
+    },
+    "up/high/risk-on": {
+     "annualized_return": -0.08240999306462024,
+     "days": 180,
+     "sharpe": -2.64324279938548
+    },
+    "up/low/risk-on": {
+     "annualized_return": -0.009218363213300228,
+     "days": 996,
+     "sharpe": -0.29800419430236286
+    }
+   },
+   "per_year": {
+    "2016": {
+     "benchmark_tr": 0.07655440664164659,
+     "return": 0.000191744560895879
+    },
+    "2017": {
+     "benchmark_tr": 0.21700337343683995,
+     "return": 0.010664906138731167
+    },
+    "2018": {
+     "benchmark_tr": -0.045570651274739804,
+     "return": -0.04683351188417373
+    },
+    "2019": {
+     "benchmark_tr": 0.3122175147053232,
+     "return": -0.026170664060920057
+    },
+    "2020": {
+     "benchmark_tr": 0.1837320598492158,
+     "return": -0.016440508109691332
+    },
+    "2021": {
+     "benchmark_tr": 0.2874505558494558,
+     "return": 0.0012546925709557843
+    },
+    "2022": {
+     "benchmark_tr": -0.181716846216464,
+     "return": -0.025174296606051638
+    }
+   }
+  },
+  "meanrev": {
+   "contribution_by_instrument": {
+    "AAPL": 404.078724992316,
+    "AMZN": 10060.248471708222,
+    "BAC": 4666.362011923622,
+    "BRK.B": 3258.492954545669,
+    "GE": -1423.3365664313553,
+    "GOOGL": 23980.76490996622,
+    "JNJ": 12171.553536542728,
+    "JPM": 12183.842266889886,
+    "MA": 2381.1374554859576,
+    "META": 1702.47070038395,
+    "MSFT": 16349.237540485561,
+    "NVDA": -1592.3921992271057,
+    "PG": 83.45442545837298,
+    "T": -1828.6203419471517,
+    "TSLA": -1541.4582928901327,
+    "UNH": 881.8511555275436,
+    "V": 4780.230591611824,
+    "WFC": -22.818269349054198,
+    "XOM": -13806.0355198146
+   },
+   "development": {
+    "annualized_volatility": 0.18886837064877868,
+    "average_holding_sessions": 13.75,
+    "average_loss": -418.9912136631687,
+    "average_win": 386.71792044057764,
+    "benchmark_total_return": 1.0462795315751339,
+    "cagr": 0.08779461870729954,
+    "calmar": 0.3242045196308468,
+    "commissions": 2493.1006524400004,
+    "cvar_5": 0.029757393335983144,
+    "dividends": 8417.638999999997,
+    "excess_return_vs_total_return_benchmark": -0.319388896016511,
+    "expectancy": 31.506333623881083,
+    "exposure": 0.592897500582899,
+    "fills": 1804,
+    "final_equity": 172689.0635558623,
+    "gross_exposure_mean": 0.592897500582899,
+    "hit_rate": 0.5591317365269461,
+    "liquidations": 0,
+    "max_drawdown": 0.270800107312712,
+    "n_trades": 1336.0,
+    "net_exposure_mean": 0.592897500582899,
+    "payoff_ratio": 0.9229738186144021,
+    "profit_factor": 1.1705627207214913,
+    "reconciliation_error": 1.766693458193913e-10,
+    "rejected_orders": 0,
+    "round_trips": 1336,
+    "sharpe": 0.5401288580473016,
+    "slippage": 5105.25399169763,
+    "sortino": 0.7755654558314299,
+    "total_return": 0.7268906355586229,
+    "transaction_costs": 7598.354644137637,
+    "turnover": 25.129146122025983
+   },
+   "drawdown_periods": [
+    {
+     "depth": -0.270800107312712,
+     "recovered": "2020-07-31",
+     "start": "2020-02-06",
+     "trough": "2020-03-23"
+    },
+    {
+     "depth": -0.24719204702238262,
+     "recovered": null,
+     "start": "2021-11-08",
+     "trough": "2022-11-03"
+    },
+    {
+     "depth": -0.15126339483402196,
+     "recovered": "2019-03-28",
+     "start": "2018-10-04",
+     "trough": "2018-12-24"
+    }
+   ],
+   "per_regime": {
+    "down/high/risk-off": {
+     "annualized_return": 0.04724987987512795,
+     "days": 226,
+     "sharpe": 0.12519648348834045
+    },
+    "down/low/risk-off": {
+     "annualized_return": 0.1640543413182017,
+     "days": 53,
+     "sharpe": 0.5886889762843729
+    },
+    "down/low/risk-on": {
+     "annualized_return": 0.4968663008524942,
+     "days": 5,
+     "sharpe": null
+    },
+    "range/high/risk-off": {
+     "annualized_return": 1.1283963503414451,
+     "days": 23,
+     "sharpe": 8.16854462865575
+    },
+    "range/high/risk-on": {
+     "annualized_return": -0.36412923116135554,
+     "days": 91,
+     "sharpe": -1.3909335330638872
+    },
+    "range/low/risk-off": {
+     "annualized_return": -0.051175550344724915,
+     "days": 10,
+     "sharpe": null
+    },
+    "range/low/risk-on": {
+     "annualized_return": 0.6411216958792528,
+     "days": 52,
+     "sharpe": 4.599256711630285
+    },
+    "up/high/risk-on": {
+     "annualized_return": 0.08881207938650763,
+     "days": 180,
+     "sharpe": 0.6058753608511432
+    },
+    "up/low/risk-on": {
+     "annualized_return": 0.10382118634606198,
+     "days": 996,
+     "sharpe": 1.0085244629204813
+    }
+   },
+   "per_year": {
+    "2016": {
+     "benchmark_tr": 0.07655440664164659,
+     "return": 0.05330927350415693
+    },
+    "2017": {
+     "benchmark_tr": 0.21700337343683995,
+     "return": 0.162479996837799
+    },
+    "2018": {
+     "benchmark_tr": -0.045570651274739804,
+     "return": 0.08043941754182393
+    },
+    "2019": {
+     "benchmark_tr": 0.3122175147053232,
+     "return": 0.1870570733040091
+    },
+    "2020": {
+     "benchmark_tr": 0.1837320598492158,
+     "return": 0.17988926561153118
+    },
+    "2021": {
+     "benchmark_tr": 0.2874505558494558,
+     "return": 0.14947873253958543
+    },
+    "2022": {
+     "benchmark_tr": -0.181716846216464,
+     "return": -0.18920842491665624
+    }
+   }
+  },
+  "tsmom": {
+   "contribution_by_instrument": {
+    "AAPL": 29231.14254404815,
+    "AMZN": 25904.795694966466,
+    "BAC": -1222.0235823856349,
+    "BRK.B": 10606.433635155323,
+    "GE": -327.3858418877538,
+    "GOOGL": 9863.282921380276,
+    "JNJ": -5808.894508758873,
+    "JPM": -6016.8407699635945,
+    "MA": 2462.6771079804803,
+    "META": 4707.25870648745,
+    "MSFT": 36506.134286316985,
+    "NVDA": -2213.294748335086,
+    "PG": 922.1274141126877,
+    "T": -880.6572632253691,
+    "TSLA": -2552.818629401195,
+    "UNH": -577.5785364715994,
+    "V": -1961.6442292491047,
+    "WFC": -474.3963231775639,
+    "XOM": -2371.9424444242327
+   },
+   "development": {
+    "annualized_volatility": 0.19547377149134323,
+    "average_holding_sessions": 143.09888059701493,
+    "average_loss": -458.3979240213503,
+    "average_win": 447.09708155994656,
+    "benchmark_total_return": 1.0462795315751339,
+    "cagr": 0.10904177216933819,
+    "calmar": 0.359309497032953,
+    "commissions": 372.59379090000016,
+    "cvar_5": 0.030682798399544516,
+    "dividends": 9505.663099999994,
+    "excess_return_vs_total_return_benchmark": -0.0883157772434553,
+    "expectancy": 109.22581082065669,
+    "exposure": 0.8742080768951314,
+    "fills": 621,
+    "final_equity": 195796.37543316785,
+    "gross_exposure_mean": 0.8742080768951314,
+    "hit_rate": 0.6268656716417911,
+    "liquidations": 0,
+    "max_drawdown": 0.30347589771426986,
+    "n_trades": 536.0,
+    "net_exposure_mean": 0.8742080768951314,
+    "payoff_ratio": 0.9753470906624843,
+    "profit_factor": 1.6385831123129737,
+    "reconciliation_error": -4.3655745685100555e-11,
+    "rejected_orders": 0,
+    "round_trips": 536,
+    "sharpe": 0.6274900774193669,
+    "slippage": 757.6828759321752,
+    "sortino": 0.8780357098494574,
+    "total_return": 0.9579637543316786,
+    "transaction_costs": 1130.2766668321744,
+    "turnover": 3.619422515496476
+   },
+   "drawdown_periods": [
+    {
+     "depth": -0.30347589771426986,
+     "recovered": "2020-07-06",
+     "start": "2020-02-19",
+     "trough": "2020-03-23"
+    },
+    {
+     "depth": -0.23007196550389164,
+     "recovered": null,
+     "start": "2022-01-04",
+     "trough": "2022-10-12"
+    },
+    {
+     "depth": -0.21282470163356149,
+     "recovered": "2019-12-26",
+     "start": "2018-09-20",
+     "trough": "2018-12-24"
+    }
+   ],
+   "per_regime": {
+    "down/high/risk-off": {
+     "annualized_return": 0.17556473583170154,
+     "days": 209,
+     "sharpe": 0.4857101112050748
+    },
+    "down/low/risk-off": {
+     "annualized_return": -0.29312478095455036,
+     "days": 44,
+     "sharpe": -2.691165883047216
+    },
+    "range/high/risk-off": {
+     "annualized_return": 0.29340605610188014,
+     "days": 43,
+     "sharpe": 1.646965302712979
+    },
+    "range/high/risk-on": {
+     "annualized_return": -0.2559544537117142,
+     "days": 124,
+     "sharpe": -1.0687651086448808
+    },
+    "range/low/risk-on": {
+     "annualized_return": 0.45767652684708726,
+     "days": 81,
+     "sharpe": 3.876715424299549
+    },
+    "up/high/risk-on": {
+     "annualized_return": -0.07190502310539226,
+     "days": 143,
+     "sharpe": -0.3489572572249012
+    },
+    "up/low/risk-on": {
+     "annualized_return": 0.1739005323054812,
+     "days": 973,
+     "sharpe": 1.2412490759676185
+    }
+   },
+   "per_year": {
+    "2016": {
+     "benchmark_tr": 0.07655440664164659,
+     "return": -0.014018260529547688
+    },
+    "2017": {
+     "benchmark_tr": 0.21700337343683995,
+     "return": 0.3011172739206214
+    },
+    "2018": {
+     "benchmark_tr": -0.045570651274739804,
+     "return": 0.005729111443875556
+    },
+    "2019": {
+     "benchmark_tr": 0.3122175147053232,
+     "return": 0.1911406451171569
+    },
+    "2020": {
+     "benchmark_tr": 0.1837320598492158,
+     "return": 0.26536536860875093
+    },
+    "2021": {
+     "benchmark_tr": 0.2874505558494558,
+     "return": 0.24015361598220175
+    },
+    "2022": {
+     "benchmark_tr": -0.181716846216464,
+     "return": -0.1881349613340968
+    }
+   }
+  },
+  "xsmom": {
+   "contribution_by_instrument": {
+    "AAPL": 26988.64699751534,
+    "AMZN": 29398.97340772459,
+    "BAC": -1486.3855945068283,
+    "BRK.B": -6684.384452234746,
+    "GE": 1.1828972766381092,
+    "GOOGL": 3751.3692481206126,
+    "JNJ": -2591.5142337068755,
+    "JPM": 1647.4867049442794,
+    "MA": 2519.961302359651,
+    "META": 9893.870798084747,
+    "MSFT": 31709.478556495906,
+    "NVDA": -7250.191854363327,
+    "T": 666.239641594858,
+    "TSLA": -4480.733110151737,
+    "UNH": -613.0666550174501,
+    "V": -1660.871726473044,
+    "XOM": -1609.0080166315067
+   },
+   "development": {
+    "annualized_volatility": 0.191553821096299,
+    "average_holding_sessions": 124.27272727272727,
+    "average_loss": -835.1336545379432,
+    "average_win": 627.5289383661362,
+    "benchmark_total_return": 1.0462795315751339,
+    "cagr": 0.09495276049771251,
+    "calmar": 0.2932392903790701,
+    "commissions": 376.3718489099999,
+    "cvar_5": 0.029761044032369958,
+    "dividends": 5830.725000000001,
+    "excess_return_vs_total_return_benchmark": -0.2442689924648227,
+    "expectancy": 100.08394274314999,
+    "exposure": 0.7395589561927802,
+    "fills": 408,
+    "final_equity": 180201.0539110311,
+    "gross_exposure_mean": 0.7395589561927802,
+    "hit_rate": 0.6393939393939394,
+    "liquidations": 0,
+    "max_drawdown": 0.3238064052568371,
+    "n_trades": 330.0,
+    "net_exposure_mean": 0.7395589561927802,
+    "payoff_ratio": 0.7514113878135242,
+    "profit_factor": 1.332334477551711,
+    "reconciliation_error": 1.382431946694851e-10,
+    "rejected_orders": 0,
+    "round_trips": 330,
+    "sharpe": 0.5695954811794186,
+    "slippage": 766.2601400589358,
+    "sortino": 0.7967129120138013,
+    "total_return": 0.8020105391103112,
+    "transaction_costs": 1142.6319889689353,
+    "turnover": 3.7249983604929597
+   },
+   "drawdown_periods": [
+    {
+     "depth": -0.3238064052568371,
+     "recovered": null,
+     "start": "2021-11-24",
+     "trough": "2022-10-12"
+    },
+    {
+     "depth": -0.24875646713502875,
+     "recovered": "2020-06-10",
+     "start": "2020-02-19",
+     "trough": "2020-03-23"
+    },
+    {
+     "depth": -0.21553015418735577,
+     "recovered": "2019-12-26",
+     "start": "2018-09-04",
+     "trough": "2018-12-24"
+    }
+   ],
+   "per_regime": {
+    "down/high/risk-off": {
+     "annualized_return": 0.19084818148376226,
+     "days": 209,
+     "sharpe": 0.5809379683514027
+    },
+    "down/low/risk-off": {
+     "annualized_return": -0.45251794988606686,
+     "days": 44,
+     "sharpe": -3.043293164710936
+    },
+    "range/high/risk-off": {
+     "annualized_return": 0.3071507496032618,
+     "days": 43,
+     "sharpe": 1.8980096390968944
+    },
+    "range/high/risk-on": {
+     "annualized_return": -0.30554586541040757,
+     "days": 124,
+     "sharpe": -1.1487927161438258
+    },
+    "range/low/risk-on": {
+     "annualized_return": 0.36320331390531874,
+     "days": 81,
+     "sharpe": 2.9561238723954864
+    },
+    "up/high/risk-on": {
+     "annualized_return": -0.07349579848972325,
+     "days": 143,
+     "sharpe": -0.4048826962936206
+    },
+    "up/low/risk-on": {
+     "annualized_return": 0.16885421995011565,
+     "days": 973,
+     "sharpe": 1.1570694855887973
+    }
+   },
+   "per_year": {
+    "2016": {
+     "benchmark_tr": 0.07655440664164659,
+     "return": -0.010868509823738881
+    },
+    "2017": {
+     "benchmark_tr": 0.21700337343683995,
+     "return": 0.25299517973389385
+    },
+    "2018": {
+     "benchmark_tr": -0.045570651274739804,
+     "return": 0.008316666146302998
+    },
+    "2019": {
+     "benchmark_tr": 0.3122175147053232,
+     "return": 0.1895895431520671
+    },
+    "2020": {
+     "benchmark_tr": 0.1837320598492158,
+     "return": 0.29798249099028595
+    },
+    "2021": {
+     "benchmark_tr": 0.2874505558494558,
+     "return": 0.25083353208977677
+    },
+    "2022": {
+     "benchmark_tr": -0.181716846216464,
+     "return": -0.2533940182295227
+    }
+   }
+  }
+ }
+}

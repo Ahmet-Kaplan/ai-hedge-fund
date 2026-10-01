@@ -1,0 +1,254 @@
+{
+ "breakout": {
+  "bootstrap_sharpe_ci_per_period": [
+   -0.08096238418035381,
+   0.013017782200882464
+  ],
+  "cpcv_sharpe": {
+   "max": 0.3898948506860386,
+   "mean": -0.6713628411125201,
+   "min": -1.997147171122375,
+   "paths": 15,
+   "share_positive": 0.2
+  },
+  "dsr": 0.000865570620510862,
+  "dsr_n_trials": 4,
+  "dsr_sr_variance": 0.0013454161516072184,
+  "gates": {
+   "checks": {
+    "bootstrap": false,
+    "deflated_sharpe": false,
+    "max_drawdown": true,
+    "min_trades": true,
+    "oos_sharpe": false,
+    "pbo": false,
+    "walk_forward": false
+   },
+   "gates_hash": "2fc90f4ad972f482",
+   "passed": false,
+   "values": {
+    "bootstrap_sharpe_lower": -0.08096238418035381,
+    "deflated_sharpe": 0.000865570620510862,
+    "max_drawdown": 0.12388222468388332,
+    "n_trades": 77.0,
+    "oos_sharpe_annual": -0.5832158862181708,
+    "pbo": 0.6714285714285714,
+    "walk_forward_positive_share": 0.3333333333333333
+   }
+  },
+  "monte_carlo": {
+   "max_drawdown_median": 0.29906524993817424,
+   "max_drawdown_p95": 0.32654793391772396,
+   "probability_of_ruin": 0.0
+  },
+  "observations": 1636,
+  "pbo_family": 0.6714285714285714,
+  "psr": 0.06326809827150362,
+  "purged_kfold_sharpe": [
+   0.39806246824880787,
+   -1.3183260003928698,
+   -2.1150984466686986,
+   -0.43857487972290715,
+   0.3969290964986246,
+   -1.9697892506061803
+  ],
+  "walk_forward_positive_share": 0.3333333333333333,
+  "walk_forward_sharpe_by_year": {
+   "2017": 0.40718212296157147,
+   "2018": -1.3495507930718849,
+   "2019": -1.7917426853291412,
+   "2020": -0.7497721298605786,
+   "2021": 0.05073094064038372,
+   "2022": -1.6556765503729325
+  }
+ },
+ "meanrev": {
+  "bootstrap_sharpe_ci_per_period": [
+   -0.0017581329586489022,
+   0.0774314607839765
+  ],
+  "cpcv_sharpe": {
+   "max": 1.8488088531939113,
+   "mean": 0.714258151146995,
+   "min": -0.16998100624233517,
+   "paths": 15,
+   "share_positive": 0.9333333333333333
+  },
+  "dsr": 0.4269857129795718,
+  "dsr_n_trials": 4,
+  "dsr_sr_variance": 0.0013454161516072184,
+  "gates": {
+   "checks": {
+    "bootstrap": false,
+    "deflated_sharpe": false,
+    "max_drawdown": false,
+    "min_trades": true,
+    "oos_sharpe": true,
+    "pbo": false,
+    "walk_forward": true
+   },
+   "gates_hash": "2fc90f4ad972f482",
+   "passed": false,
+   "values": {
+    "bootstrap_sharpe_lower": -0.0017581329586489022,
+    "deflated_sharpe": 0.4269857129795718,
+    "max_drawdown": 0.270800107312712,
+    "n_trades": 1336.0,
+    "oos_sharpe_annual": 0.5401288580473016,
+    "pbo": 0.6714285714285714,
+    "walk_forward_positive_share": 0.8333333333333334
+   }
+  },
+  "monte_carlo": {
+   "max_drawdown_median": 0.25248400985418573,
+   "max_drawdown_p95": 0.3641424376021804,
+   "probability_of_ruin": 0.0015
+  },
+  "observations": 1636,
+  "pbo_family": 0.6714285714285714,
+  "psr": 0.9148551407554963,
+  "purged_kfold_sharpe": [
+   1.6101038207093257,
+   1.7972699728820356,
+   0.2913625279168906,
+   0.4739645468137303,
+   1.8957029031922645,
+   -0.45828560130969687
+  ],
+  "walk_forward_positive_share": 0.8333333333333334,
+  "walk_forward_sharpe_by_year": {
+   "2017": 2.324682951511531,
+   "2018": 0.5394426318591536,
+   "2019": 1.6162132578369957,
+   "2020": 0.6932791951684519,
+   "2021": 1.2142064420026282,
+   "2022": -0.6322632915895022
+  }
+ },
+ "tsmom": {
+  "bootstrap_sharpe_ci_per_period": [
+   -0.002518666070469755,
+   0.0886093464576853
+  ],
+  "cpcv_sharpe": {
+   "max": 1.7781048550164804,
+   "mean": 0.6750071930340726,
+   "min": -0.6158680649867248,
+   "paths": 15,
+   "share_positive": 0.8666666666666667
+  },
+  "dsr": 0.514993953345203,
+  "dsr_n_trials": 4,
+  "dsr_sr_variance": 0.0013454161516072184,
+  "gates": {
+   "checks": {
+    "bootstrap": false,
+    "deflated_sharpe": false,
+    "max_drawdown": false,
+    "min_trades": true,
+    "oos_sharpe": true,
+    "pbo": false,
+    "walk_forward": true
+   },
+   "gates_hash": "2fc90f4ad972f482",
+   "passed": false,
+   "values": {
+    "bootstrap_sharpe_lower": -0.002518666070469755,
+    "deflated_sharpe": 0.514993953345203,
+    "max_drawdown": 0.30347589771426986,
+    "n_trades": 536.0,
+    "oos_sharpe_annual": 0.6274900774193669,
+    "pbo": 0.6714285714285714,
+    "walk_forward_positive_share": 0.8333333333333334
+   }
+  },
+  "monte_carlo": {
+   "max_drawdown_median": 0.06466515054070338,
+   "max_drawdown_p95": 0.10567723261225319,
+   "probability_of_ruin": 0.0
+  },
+  "observations": 1636,
+  "pbo_family": 0.6714285714285714,
+  "psr": 0.9437371122671663,
+  "purged_kfold_sharpe": [
+   1.4583509253595892,
+   1.6979448906012402,
+   -0.43575350142391805,
+   0.8784695516995955,
+   1.8695870610585974,
+   -0.802761199796309
+  ],
+  "walk_forward_positive_share": 0.8333333333333334,
+  "walk_forward_sharpe_by_year": {
+   "2017": 2.9330401527011554,
+   "2018": 0.13412637699096108,
+   "2019": 1.4191198660500024,
+   "2020": 0.850218436194072,
+   "2021": 1.594458123421278,
+   "2022": -1.0760831346994157
+  }
+ },
+ "xsmom": {
+  "bootstrap_sharpe_ci_per_period": [
+   -0.005280447198148999,
+   0.08150044986832836
+  ],
+  "cpcv_sharpe": {
+   "max": 1.9078689855206559,
+   "mean": 0.6462242390605579,
+   "min": -0.8281502143689935,
+   "paths": 15,
+   "share_positive": 0.8
+  },
+  "dsr": 0.45663628278125834,
+  "dsr_n_trials": 4,
+  "dsr_sr_variance": 0.0013454161516072184,
+  "gates": {
+   "checks": {
+    "bootstrap": false,
+    "deflated_sharpe": false,
+    "max_drawdown": false,
+    "min_trades": true,
+    "oos_sharpe": true,
+    "pbo": false,
+    "walk_forward": true
+   },
+   "gates_hash": "2fc90f4ad972f482",
+   "passed": false,
+   "values": {
+    "bootstrap_sharpe_lower": -0.005280447198148999,
+    "deflated_sharpe": 0.45663628278125834,
+    "max_drawdown": 0.3238064052568371,
+    "n_trades": 330.0,
+    "oos_sharpe_annual": 0.5695954811794186,
+    "pbo": 0.6714285714285714,
+    "walk_forward_positive_share": 0.8333333333333334
+   }
+  },
+  "monte_carlo": {
+   "max_drawdown_median": 0.13206906253168033,
+   "max_drawdown_p95": 0.21485976247057437,
+   "probability_of_ruin": 0.0
+  },
+  "observations": 1636,
+  "pbo_family": 0.6714285714285714,
+  "psr": 0.9253041445805734,
+  "purged_kfold_sharpe": [
+   1.4811841093962792,
+   1.7835631002483385,
+   -0.4746241547431824,
+   1.0826198562423792,
+   2.021903705694391,
+   -1.1236647800986046
+  ],
+  "walk_forward_positive_share": 0.8333333333333334,
+  "walk_forward_sharpe_by_year": {
+   "2017": 2.5129611645504846,
+   "2018": 0.1409505069921176,
+   "2019": 1.4145438732214417,
+   "2020": 0.997329275669147,
+   "2021": 1.5466791251343557,
+   "2022": -1.1788224113449024
+  }
+ }
+}

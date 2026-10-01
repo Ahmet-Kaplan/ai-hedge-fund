@@ -30,3 +30,13 @@
 09:29:02   meanrev 2016-07-01..2022-12-30 cap=200 -> 200.00 (9s)
 09:29:13   tsmom 2016-07-01..2022-12-30 cap=200 -> -5.95 (11s)
 09:29:28   tsmom 2016-07-01..2022-12-30 cap=200 -> 230.08 (15s)
+09:29:38   xsmom 2016-07-01..2022-12-30 cap=200 -> -7.80 (10s)
+09:29:49   xsmom 2016-07-01..2022-12-30 cap=200 -> 192.98 (12s)
+09:29:49 STEP 10 classification
+09:29:49 done
+{
+ "breakout": "REJECT",
+ "meanrev": "INSUFFICIENT_EVIDENCE",
+ "tsmom": "INSUFFICIENT_EVIDENCE",
+ "xsmom": "REJECT"
+}

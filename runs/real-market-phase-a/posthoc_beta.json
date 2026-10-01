@@ -1,0 +1,32 @@
+{
+ "SPY_total_return_dev": {
+  "cagr": 0.11792270242180591,
+  "max_drawdown": 0.33699940470552747,
+  "sharpe": 0.6698721442292509
+ },
+ "breakout": {
+  "alpha_annualized": -0.01825729472071914,
+  "alpha_tstat": -1.7416181399290538,
+  "beta_vs_spy_tr": 0.019586302599567947,
+  "correlation_vs_spy_tr": 0.1397474954152501
+ },
+ "meanrev": {
+  "alpha_annualized": -0.007557882571612508,
+  "alpha_tstat": -0.2039414367412445,
+  "beta_vs_spy_tr": 0.8498751251098545,
+  "correlation_vs_spy_tr": 0.8660541110588565
+ },
+ "note": "post-hoc descriptive statistics; not pre-registered and not used for classification",
+ "tsmom": {
+  "alpha_annualized": 0.004973695832220985,
+  "alpha_tstat": 0.14785811590598977,
+  "beta_vs_spy_tr": 0.9128027418053565,
+  "correlation_vs_spy_tr": 0.8987472752367233
+ },
+ "xsmom": {
+  "alpha_annualized": -0.003368616976012496,
+  "alpha_tstat": -0.09309757102057539,
+  "beta_vs_spy_tr": 0.8724125825894962,
+  "correlation_vs_spy_tr": 0.8765571653210605
+ }
+}

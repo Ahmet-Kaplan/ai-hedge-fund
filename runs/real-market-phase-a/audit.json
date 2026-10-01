@@ -1,0 +1,28 @@
+{
+ "config_hashes_match_preregistration": true,
+ "financial_datasets_clients_constructed": 0,
+ "holdout_records": [
+  {
+   "recorded_at": "2026-10-01T09:27:38.698644+00:00",
+   "spec_hash": "b13d865ab364ee11"
+  },
+  {
+   "recorded_at": "2026-10-01T09:27:54.407024+00:00",
+   "spec_hash": "5775739dba617f29"
+  },
+  {
+   "recorded_at": "2026-10-01T09:28:05.718200+00:00",
+   "spec_hash": "f23a4d3fb5b1ee22"
+  },
+  {
+   "recorded_at": "2026-10-01T09:28:14.718807+00:00",
+   "spec_hash": "4d7783bca536dc8b"
+  }
+ ],
+ "live_broker_modules_loaded": [],
+ "lookahead_violations": 0,
+ "preregistration_hash": "b37d3f1b31a356e781eae87266a08588cc6eb7eba0892a5633dcb8032c8fa059",
+ "registry_trials_in_family": 4,
+ "registry_verified": true,
+ "tiingo_requests": 0
+}
