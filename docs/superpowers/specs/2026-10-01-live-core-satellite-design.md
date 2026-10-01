@@ -209,3 +209,19 @@ reviews can see the boundary; otherwise stay on Opus.
 Crypto; leverage; automatic deposits/withdrawals; ISA wrappers; tax
 reports beyond the raw ledger; a live scheduler (the user runs it daily);
 satellite strategies other than mirroring the paper fund.
+
+## 12. Agent model decision result (2026-10-01)
+
+200 of Opus 5.5's saved paper-fund prompts (59 bullish, 71 neutral, 70
+bearish) replayed through local Ollama models on the user's Mac.
+
+| Model | Valid | Agree | Opposite | Correlation | Lowest agent | s/answer |
+|---|---|---|---|---|---|---|
+| Bar | ≥ 98% | ≥ 75% | ≤ 5% | ≥ 0.7 | ≥ 60% | — |
+| qwen3:8b | 100% | 46% | 14% | 0.30 | Lynch 33% | 62 |
+| gpt-oss:20b | 92% | 54% | 8% | 0.53 | Munger 48% | 22 |
+
+Neither passes; the agents stay on Opus 5.5. A local model that says the
+opposite of the reference on 8–14% of calls would change the fund's book, so
+the paper track record would no longer describe the analyst in use.
+Raw results: `~/.hedge-fund/model-compare/`.
