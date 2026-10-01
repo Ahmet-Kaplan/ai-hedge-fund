@@ -1,7 +1,8 @@
 """The paper fund's two daily steps: submit (morning) and reconcile (next morning).
 
-submit plans and sends market-on-close orders on rebalance days; every guard
-that can stop it runs before any analyst is asked or any order is sent.
+submit plans and sends market orders on rebalance days (sent before the
+open, they fill at the opening price); every guard that can stop it runs
+before any analyst is asked or any order is sent.
 reconcile records the previous session's fills and closing NAV. Alpaca is the
 source of truth for the book; the ledger is the record.
 """
@@ -9,7 +10,7 @@ source of truth for the book; the ledger is the record.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -19,7 +20,7 @@ from hedge_fund.brokers.alpaca import Account, OrderResult
 from hedge_fund.data.protocol import DataClient
 from hedge_fund.data.sessions import NEW_YORK
 from hedge_fund.fund import Fund, FundSpec
-from hedge_fund.live.calendar import MOC_CUTOFF, client_order_prefix, is_rebalance_day, ny_midnight
+from hedge_fund.live.calendar import ORDER_CUTOFF, RECONCILE_DEADLINE, client_order_prefix, is_rebalance_day, ny_midnight
 from hedge_fund.live.ledger import Ledger, NavRow
 from hedge_fund.live.plan import LivePlan, plan_rebalance
 from hedge_fund.paths import KILL_PATH
@@ -29,9 +30,6 @@ logger = logging.getLogger(__name__)
 
 DRAWDOWN_HALT = 0.15   # halt and flatten at a 15% fall from peak NAV
 
-# Past this time on a trading day, that day's MOC fills may already be in the
-# account, so "current book" would no longer be the previous session's book.
-_RECONCILE_DEADLINE = time(15, 50)
 
 
 class PaperAccount(Protocol):
@@ -41,7 +39,7 @@ class PaperAccount(Protocol):
     def list_orders(self, after: str) -> list[OrderResult]: ...
     def positions(self) -> dict[str, int]: ...
     def account(self) -> Account: ...
-    def submit_moc(self, ticker: str, side: Literal["buy", "sell"], quantity: int, client_order_id: str) -> OrderResult: ...
+    def submit_order(self, ticker: str, side: Literal["buy", "sell"], quantity: int, client_order_id: str) -> OrderResult: ...
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +65,7 @@ def submit(
     ledger: Ledger, *, now: datetime, dry_run: bool = False, force_rebalance: bool = False,
     kill_path: Path = KILL_PATH,
 ) -> SubmitResult:
-    """Plan and send today's market-on-close orders, or say exactly why not.
+    """Plan and send today's orders, or say exactly why not.
 
     A dry run skips the calendar, clock and rebalance-day guards (it never
     sends anything, so the plan can be inspected any day) and never halts.
@@ -88,8 +86,8 @@ def submit(
     if not dry_run:
         if not sessions or sessions[-1] != session:
             return done("not_trading_day")
-        if now.time() > MOC_CUTOFF:
-            return done("too_late", f"after {MOC_CUTOFF:%H:%M} ET; market-on-close orders are closed")
+        if now.time() > ORDER_CUTOFF:
+            return done("too_late", f"after {ORDER_CUTOFF:%H:%M} ET; too close to the close to send day orders")
         if any(o.client_order_id.startswith(prefix) for o in client.list_orders(after=ny_midnight(session))):
             return done("already_submitted")
 
@@ -118,8 +116,8 @@ def submit(
 
     ledger.write_plan(session, payload)   # the plan is on disk before anything is sent
     orders: list[OrderResult] = []
-    for order in plan.orders:
-        orders.append(client.submit_moc(order.ticker, order.side, order.quantity, prefix + order.ticker))
+    for ticker, side, quantity, client_id in _executable(plan, prefix):
+        orders.append(client.submit_order(ticker, side, quantity, client_id))
         payload["orders"] = [o.model_dump(mode="json") for o in orders]
         ledger.write_plan(session, payload)
     rejected = sum(o.status == "rejected" for o in orders)
@@ -133,14 +131,14 @@ def retry_rejected(
 
     Same quantities and client order ids as the original plan; the plan file is
     updated in place. Refuses when killed, when there is no plan for today, or
-    after the market-on-close cutoff.
+    after the order cutoff.
     """
     now = now.astimezone(NEW_YORK)
     session = now.date().isoformat()
     if kill_path.exists():
         raise ValueError(f"{kill_path} exists (KILL switch on); not sending anything")
-    if now.time() > MOC_CUTOFF:
-        raise ValueError(f"after {MOC_CUTOFF:%H:%M} ET (15:45); market-on-close orders are closed for today")
+    if now.time() > ORDER_CUTOFF:
+        raise ValueError(f"after {ORDER_CUTOFF:%H:%M} ET; too close to the close to send day orders")
     payload = ledger.read_plan(session)
     if payload is None:
         raise ValueError(f"no plan submitted for {session}; nothing to retry")
@@ -148,12 +146,31 @@ def retry_rejected(
     for i, order in enumerate(payload["orders"]):
         if order["status"] != "rejected":
             continue
-        result = client.submit_moc(order["ticker"], order["side"], order["quantity"], order["client_order_id"])
+        result = client.submit_order(order["ticker"], order["side"], order["quantity"], order["client_order_id"])
         payload["orders"][i] = result.model_dump(mode="json")
         ledger.write_plan(session, payload)
         retried.append(result)
         logger.info("retry %s %s %d: %s %s", order["ticker"], order["side"], order["quantity"], result.status, result.reason or "")
     return retried
+
+
+def _executable(plan: LivePlan, prefix: str) -> list[tuple[str, Literal["buy", "sell"], int, str]]:
+    """Orders as the broker accepts them: a long↔short flip becomes close-then-open.
+
+    Alpaca won't take one order that crosses zero (sell 10 while long 5); it
+    must be sell 5 to close, then sell 5 to open the short.
+    """
+    out = []
+    for order in plan.orders:
+        held = plan.positions.get(order.ticker, 0)
+        delta = order.quantity if order.side == "buy" else -order.quantity
+        crosses = held != 0 and (held + delta) * held < 0
+        if crosses:
+            out.append((order.ticker, order.side, abs(held), prefix + order.ticker))
+            out.append((order.ticker, order.side, order.quantity - abs(held), prefix + order.ticker + "-open"))
+        else:
+            out.append((order.ticker, order.side, order.quantity, prefix + order.ticker))
+    return out
 
 
 def _drawdown_breach(ledger: Ledger) -> str | None:
@@ -193,9 +210,9 @@ def session_to_reconcile(client: PaperAccount, now: datetime) -> str:
     now = now.astimezone(NEW_YORK)
     today = now.date().isoformat()
     sessions = client.calendar((now.date() - timedelta(days=10)).isoformat(), today)
-    if today in sessions and now.time() >= _RECONCILE_DEADLINE:
-        raise ValueError("after 15:50 ET today's market-on-close fills may already be booked; "
-                         "reconcile the previous session tomorrow before 15:50 ET")
+    if today in sessions and now.time() >= RECONCILE_DEADLINE:
+        raise ValueError("after the 09:30 ET open today's fills may already be booked; "
+                         "reconcile the previous session before 09:30 ET (14:30 UK) on a trading day")
     past = [s for s in sessions if s < today]
     if not past:
         raise ValueError("no completed trading session in the last 10 days")

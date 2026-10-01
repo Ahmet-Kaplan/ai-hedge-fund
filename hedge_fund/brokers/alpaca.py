@@ -5,8 +5,8 @@ paper endpoint, and the constructor refuses any other. There is no live-money
 URL anywhere in the codebase.
 
 Deliberately not a `Broker`: the protocol promises a complete fill or a raise,
-and a market-on-close order fills hours after it is submitted. The live path
-is submit-then-reconcile instead (hedge_fund/live/runner.py).
+and an order sent before the open fills hours later. The live path is
+submit-then-reconcile instead (hedge_fund/live/runner.py).
 """
 
 from __future__ import annotations
@@ -83,9 +83,8 @@ class AlpacaPaperClient:
     def positions(self) -> dict[str, int]:
         """Signed whole shares per ticker. Negative = short.
 
-        The fund trades whole shares (market-on-close orders cannot be
-        fractional), so any fractional remainder is left out here and
-        reported by fractional_holdings() instead.
+        The fund trades whole shares, so any fractional remainder is left
+        out here and reported by fractional_holdings() instead.
         """
         held: dict[str, int] = {}
         for row in self._request("GET", "/v2/positions"):
@@ -116,11 +115,17 @@ class AlpacaPaperClient:
         })
         return [_order_result(row) for row in rows]
 
-    def submit_moc(self, ticker: str, side: Literal["buy", "sell"], quantity: int, client_order_id: str) -> OrderResult:
-        """Submit a market-on-close order. A refused order comes back as status "rejected"."""
+    def submit_order(self, ticker: str, side: Literal["buy", "sell"], quantity: int, client_order_id: str,
+                     time_in_force: str = "day") -> OrderResult:
+        """Submit a market order. A refused order comes back as status "rejected".
+
+        "day" (default): sent before the open, it fills at the opening price —
+        reliable on Alpaca's paper engine, which fills market-on-close ("cls")
+        orders only sporadically.
+        """
         body = {
             "symbol": ticker, "qty": str(quantity), "side": side, "type": "market",
-            "time_in_force": "cls", "client_order_id": client_order_id,
+            "time_in_force": time_in_force, "client_order_id": client_order_id,
         }
         try:
             row = self._request("POST", "/v2/orders", json=body)

@@ -67,22 +67,22 @@ def test_calendar_returns_sorted_session_dates():
     assert session.calls[0]["params"] == {"start": "2024-06-01", "end": "2024-06-10"}
 
 
-def test_submit_moc_sends_market_on_close():
+def test_submit_order_sends_a_day_market_order():
     client, session = _client(FakeResponse(payload={
         "id": "o1", "client_order_id": "f-2024-06-10-AAPL", "symbol": "AAPL", "side": "buy",
         "qty": "5", "filled_qty": "0", "filled_avg_price": None, "status": "accepted",
     }))
-    result = client.submit_moc("AAPL", "buy", 5, "f-2024-06-10-AAPL")
+    result = client.submit_order("AAPL", "buy", 5, "f-2024-06-10-AAPL")
     assert session.calls[0]["json"] == {
         "symbol": "AAPL", "qty": "5", "side": "buy", "type": "market",
-        "time_in_force": "cls", "client_order_id": "f-2024-06-10-AAPL",
+        "time_in_force": "day", "client_order_id": "f-2024-06-10-AAPL",
     }
     assert (result.status, result.order_id, result.quantity, result.filled_qty) == ("accepted", "o1", 5, 0)
 
 
 def test_refused_order_is_a_rejection_not_a_crash():
     client, _ = _client(FakeResponse(422, {"message": "asset not shortable"}))
-    result = client.submit_moc("XYZ", "sell", 5, "f-2024-06-10-XYZ")
+    result = client.submit_order("XYZ", "sell", 5, "f-2024-06-10-XYZ")
     assert result.status == "rejected"
     assert "not shortable" in result.reason
 

@@ -81,10 +81,12 @@ A mandate is the desk — strategies, staff, risk, capital, cadence — and neve
 ## Paper trading on Alpaca
 
 `aihf-paper` runs a fund forward on an Alpaca **paper** account (simulated money;
-the client refuses any other endpoint). It trades exactly like the backtester:
-on the first session of each rebalance period it assesses with data through the
-previous close and submits market-on-close orders, so paper and backtest results
-are directly comparable.
+the client refuses any other endpoint). On the first session of each rebalance
+period it assesses with data through the previous close and sends market orders
+that fill at that session's open (Alpaca's paper engine fills market-on-close
+orders only sporadically). The backtester fills at the close, so each fill's
+open-vs-close difference is recorded as slippage. Run `reconcile` before the
+09:30 ET open.
 
 Add `APCA_API_KEY_ID` / `APCA_API_SECRET_KEY` (paper keys) to `~/.hedge-fund/.env`, then:
 

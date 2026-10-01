@@ -11,8 +11,13 @@ from datetime import date, datetime, time
 
 from hedge_fund.data.sessions import NEW_YORK
 
-# Alpaca stops accepting market-on-close orders at 15:50 ET; keep a margin.
-MOC_CUTOFF = time(15, 45)
+# Orders are day market orders: sent before the open they fill at the open;
+# sent during the session they fill at once. After this a day order could
+# miss the close and expire, so the runner stops sending.
+ORDER_CUTOFF = time(15, 50)
+# Fills land from the open on; the previous session's closing book is only
+# observable before then.
+RECONCILE_DEADLINE = time(9, 30)
 
 
 def is_rebalance_day(session: str, previous_session: str, cadence: str) -> bool:

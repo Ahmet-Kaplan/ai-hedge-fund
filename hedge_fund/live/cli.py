@@ -1,7 +1,7 @@
 """aihf-paper — run the fund on an Alpaca paper account.
 
     aihf-paper status                  account, halts, last NAV, schedule
-    aihf-paper submit [--dry-run] [--now]  plan (and send) today's MOC rebalance
+    aihf-paper submit [--dry-run] [--now]  plan (and send) today's rebalance (fills at the open)
     aihf-paper retry-rejected          re-send today's rejected orders
     aihf-paper reconcile               record the previous session's fills + NAV
     aihf-paper report [--backtest F] [--attribution]
@@ -63,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--model", help="LLM for the investor agents, e.g. claude-opus-5-5")
         return p
 
-    p = command("submit", "plan and send today's market-on-close rebalance")
+    p = command("submit", "plan and send today's rebalance (market orders, fill at the open)")
     p.add_argument("--dry-run", action="store_true", help="plan and save, send nothing (works any day)")
     p.add_argument("--now", action="store_true",
                    help="rebalance today even if it is not the first session of the period (e.g. to start the fund)")

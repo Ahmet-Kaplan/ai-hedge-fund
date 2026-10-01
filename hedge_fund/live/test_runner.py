@@ -36,7 +36,7 @@ class FakeAlpaca:
     def account(self):
         return Account(cash=self.cash, equity=self.cash, last_equity=self.cash, status="ACTIVE")
 
-    def submit_moc(self, ticker, side, quantity, client_order_id):
+    def submit_order(self, ticker, side, quantity, client_order_id):
         self.submitted.append((ticker, side, quantity, client_order_id))
         status = "rejected" if ticker in self.reject else "accepted"
         return OrderResult(client_order_id=client_order_id, ticker=ticker, side=side, quantity=quantity, status=status)
@@ -87,7 +87,7 @@ def test_not_a_trading_day(ledger, tmp_path):
 
 
 def test_too_late_for_moc(ledger, tmp_path):
-    result, _ = run_submit(FakeAlpaca(), ledger, tmp_path, now=datetime(2024, 6, 10, 15, 46, tzinfo=NEW_YORK))
+    result, _ = run_submit(FakeAlpaca(), ledger, tmp_path, now=datetime(2024, 6, 10, 15, 51, tzinfo=NEW_YORK))
     assert result.status == "too_late"
 
 
@@ -216,8 +216,8 @@ def test_session_to_reconcile():
     client = FakeAlpaca()
     assert session_to_reconcile(client, datetime(2024, 6, 11, 9, 0, tzinfo=NEW_YORK)) == "2024-06-10"
     assert session_to_reconcile(client, datetime(2024, 6, 8, 17, 0, tzinfo=NEW_YORK)) == "2024-06-07"
-    with pytest.raises(ValueError, match="15:50"):
-        session_to_reconcile(client, datetime(2024, 6, 11, 16, 0, tzinfo=NEW_YORK))
+    with pytest.raises(ValueError, match="09:30"):
+        session_to_reconcile(client, datetime(2024, 6, 11, 9, 31, tzinfo=NEW_YORK))
 
 
 def test_force_rebalance_trades_mid_week_but_keeps_other_guards(ledger, tmp_path):
@@ -228,7 +228,7 @@ def test_force_rebalance_trades_mid_week_but_keeps_other_guards(ledger, tmp_path
     assert result.status == "submitted"
     assert client.submitted == [("AAPL", "buy", 500, "paper-test-2024-06-11-AAPL")]
     late = submit(fund, ["AAPL"], FakeAlpaca(), FakeDataClient(SERIES), ledger,
-                  now=datetime(2024, 6, 11, 15, 46, tzinfo=NEW_YORK), force_rebalance=True, kill_path=tmp_path / "KILL")
+                  now=datetime(2024, 6, 11, 15, 51, tzinfo=NEW_YORK), force_rebalance=True, kill_path=tmp_path / "KILL")
     assert late.status == "too_late"
 
 
@@ -252,10 +252,21 @@ def test_retry_resends_only_rejected_orders(ledger, tmp_path):
 def test_retry_respects_the_guards(ledger, tmp_path):
     from hedge_fund.live.runner import retry_rejected
     run_submit(FakeAlpaca(reject={"AAPL"}), ledger, tmp_path)
-    with pytest.raises(ValueError, match="15:45"):
-        retry_rejected(FakeAlpaca(), ledger, now=datetime(2024, 6, 10, 15, 50, tzinfo=NEW_YORK), kill_path=tmp_path / "KILL")
+    with pytest.raises(ValueError, match="15:50"):
+        retry_rejected(FakeAlpaca(), ledger, now=datetime(2024, 6, 10, 15, 51, tzinfo=NEW_YORK), kill_path=tmp_path / "KILL")
     (tmp_path / "KILL").touch()
     with pytest.raises(ValueError, match="KILL"):
         retry_rejected(FakeAlpaca(), ledger, now=datetime(2024, 6, 10, 14, 0, tzinfo=NEW_YORK), kill_path=tmp_path / "KILL")
     with pytest.raises(ValueError, match="no plan"):
         retry_rejected(FakeAlpaca(), ledger, now=datetime(2024, 6, 11, 10, 0, tzinfo=NEW_YORK), kill_path=tmp_path / "NOKILL")
+
+
+
+def test_long_to_short_flip_is_sent_as_close_then_open(ledger, tmp_path):
+    fund, _ = make_fund({"AAPL": -1.0})                 # target: short 50% → -500 shares
+    client = FakeAlpaca(positions={"AAPL": 5}, cash=99_500.0)
+    result = submit(fund, ["AAPL"], client, FakeDataClient(SERIES), ledger,
+                    now=MON_10AM, kill_path=tmp_path / "KILL")
+    assert result.status == "submitted"
+    assert client.submitted == [("AAPL", "sell", 5, "paper-test-2024-06-10-AAPL"),
+                                ("AAPL", "sell", 500, "paper-test-2024-06-10-AAPL-open")]
