@@ -1,8 +1,9 @@
 """Alpaca paper-trading client — the fund's link to a simulated brokerage account.
 
-Paper only, by construction: the one base URL this module knows is Alpaca's
-paper endpoint, and the constructor refuses any other. There is no live-money
-URL anywhere in the codebase.
+Two clients share one REST base. AlpacaPaperClient talks only to the paper
+endpoint with the APCA_* paper keys. AlpacaLiveClient talks only to the live
+endpoint with its own ALPACA_LIVE_* keys and refuses a paper key, so a paper
+setting can never reach real money and vice versa.
 
 Deliberately not a `Broker`: the protocol promises a complete fill or a raise,
 and an order sent before the open fills hours later. The live path is
@@ -18,6 +19,7 @@ import requests
 from pydantic import BaseModel
 
 PAPER_BASE_URL = "https://paper-api.alpaca.markets"
+LIVE_BASE_URL = "https://api.alpaca.markets"
 
 # Alpaca answers a refused order with 403 (e.g. buying power) or 422 (e.g.
 # not shortable). Those are rejections to record, not crashes.
@@ -53,7 +55,61 @@ class OrderResult(BaseModel):
     reason: str | None = None
 
 
-class AlpacaPaperClient:
+class LiveOrder(BaseModel):
+    """A live order: a dollar (notional) buy, or a fractional / whole-share quantity."""
+
+    client_order_id: str
+    ticker: str
+    side: Literal["buy", "sell"]
+    status: str                          # Alpaca's order status, or "rejected"
+    qty: float | None = None
+    notional: float | None = None
+    order_id: str | None = None
+    filled_qty: float = 0.0
+    filled_avg_price: float | None = None
+    reason: str | None = None
+
+
+class CashFlow(BaseModel):
+    """One account activity: a deposit/withdrawal/journal (a flow) or a dividend/fee (a return)."""
+
+    id: str
+    kind: str                            # Alpaca activity type: CSD, CSW, JNLC, DIV, FEE
+    date: str
+    amount: float                        # signed: + into the account
+
+
+class _AlpacaRest:
+    """Shared transport: auth headers, JSON requests, error mapping."""
+
+    def __init__(self, key_id: str, secret_key: str, base_url: str, *, timeout: float,
+                 session: requests.Session | None) -> None:
+        self._base_url = base_url
+        self._timeout = timeout
+        self._session = session or requests.Session()
+        self._session.headers.update({"APCA-API-KEY-ID": key_id, "APCA-API-SECRET-KEY": secret_key})
+
+    def account(self) -> Account:
+        row = self._request("GET", "/v2/account")
+        return Account(cash=float(row["cash"]), equity=float(row["equity"]),
+                       last_equity=float(row["last_equity"]), status=row["status"])
+
+    def calendar(self, start: str, end: str) -> list[str]:
+        """Trading-session dates (YYYY-MM-DD) in [start, end]."""
+        rows = self._request("GET", "/v2/calendar", params={"start": start, "end": end})
+        return sorted(row["date"] for row in rows)
+
+    def _request(self, method: str, path: str, *, params: dict | None = None, json: dict | None = None) -> Any:
+        try:
+            resp = self._session.request(method, self._base_url + path, params=params, json=json, timeout=self._timeout)
+        except requests.RequestException as exc:
+            raise AlpacaError(f"{method} {path}: {exc}") from exc
+        if resp.status_code >= 400:
+            raise AlpacaError(f"{method} {path}: HTTP {resp.status_code}: {resp.text[:300]}", status_code=resp.status_code)
+        return resp.json()
+
+
+class AlpacaPaperClient(_AlpacaRest):
     """Thin REST client for the handful of paper-account endpoints the fund needs."""
 
     def __init__(
@@ -71,14 +127,7 @@ class AlpacaPaperClient:
         secret_key = secret_key or os.environ.get("APCA_API_SECRET_KEY", "")
         if not key_id or not secret_key:
             raise ValueError("set APCA_API_KEY_ID and APCA_API_SECRET_KEY (Alpaca paper keys) in ~/.hedge-fund/.env")
-        self._timeout = timeout
-        self._session = session or requests.Session()
-        self._session.headers.update({"APCA-API-KEY-ID": key_id, "APCA-API-SECRET-KEY": secret_key})
-
-    def account(self) -> Account:
-        row = self._request("GET", "/v2/account")
-        return Account(cash=float(row["cash"]), equity=float(row["equity"]),
-                       last_equity=float(row["last_equity"]), status=row["status"])
+        super().__init__(key_id, secret_key, PAPER_BASE_URL, timeout=timeout, session=session)
 
     def positions(self) -> dict[str, int]:
         """Signed whole shares per ticker. Negative = short.
@@ -102,11 +151,6 @@ class AlpacaPaperClient:
             if remainder > 1e-9:
                 fractions[row["symbol"]] = -remainder if row.get("side") == "short" else remainder
         return fractions
-
-    def calendar(self, start: str, end: str) -> list[str]:
-        """Trading-session dates (YYYY-MM-DD) in [start, end]."""
-        rows = self._request("GET", "/v2/calendar", params={"start": start, "end": end})
-        return sorted(row["date"] for row in rows)
 
     def list_orders(self, after: str) -> list[OrderResult]:
         """Every order (any status) submitted after the ISO timestamp `after`."""
@@ -136,14 +180,86 @@ class AlpacaPaperClient:
             raise
         return _order_result(row)
 
-    def _request(self, method: str, path: str, *, params: dict | None = None, json: dict | None = None) -> Any:
+
+_FLOW_PAGE = 100
+
+
+class AlpacaLiveClient(_AlpacaRest):
+    """The real-money account. Live endpoint and ALPACA_LIVE_* keys only."""
+
+    def __init__(self, key_id: str | None = None, secret_key: str | None = None, *,
+                 timeout: float = 30.0, session: requests.Session | None = None) -> None:
+        key_id = key_id or os.environ.get("ALPACA_LIVE_KEY_ID", "")
+        secret_key = secret_key or os.environ.get("ALPACA_LIVE_SECRET_KEY", "")
+        if not key_id or not secret_key:
+            raise ValueError("set ALPACA_LIVE_KEY_ID and ALPACA_LIVE_SECRET_KEY (live keys) in ~/.hedge-fund/.env")
+        if key_id == os.environ.get("APCA_API_KEY_ID"):
+            raise ValueError("ALPACA_LIVE_KEY_ID is the paper key; the live account needs its own live keys")
+        super().__init__(key_id, secret_key, LIVE_BASE_URL, timeout=timeout, session=session)
+
+    def holdings(self) -> dict[str, float]:
+        """Signed share quantities, fractions included. Negative = short."""
+        held: dict[str, float] = {}
+        for row in self._request("GET", "/v2/positions"):
+            qty = abs(float(row["qty"]))
+            if qty > 1e-9:
+                held[row["symbol"]] = -qty if row.get("side") == "short" else qty
+        return held
+
+    def list_orders(self, after: str) -> list[LiveOrder]:
+        rows = self._request("GET", "/v2/orders", params={
+            "status": "all", "after": after, "limit": 500, "direction": "asc",
+        })
+        return [_live_order(row) for row in rows]
+
+    def buy_notional(self, ticker: str, dollars: float, client_order_id: str) -> LiveOrder:
+        """Buy `dollars` worth (fractional shares) with a market day order."""
+        return self._send({"symbol": ticker, "notional": f"{dollars:.2f}", "side": "buy"}, client_order_id)
+
+    def sell_qty(self, ticker: str, qty: float, client_order_id: str) -> LiveOrder:
+        """Sell a (fractional) quantity of a long with a market day order."""
+        return self._send({"symbol": ticker, "qty": _qty(qty), "side": "sell"}, client_order_id)
+
+    def trade_shares(self, ticker: str, side: Literal["buy", "sell"], shares: int, client_order_id: str) -> LiveOrder:
+        """Whole-share market day order — shorts and covers."""
+        return self._send({"symbol": ticker, "qty": str(shares), "side": side}, client_order_id)
+
+    def cash_flows(self, after: str) -> list[CashFlow]:
+        """Deposits, withdrawals, journals, dividends and fees after date `after` (YYYY-MM-DD)."""
+        flows: list[CashFlow] = []
+        params = {"activity_types": "CSD,CSW,JNLC,DIV,FEE", "after": after, "direction": "asc", "page_size": _FLOW_PAGE}
+        while True:
+            rows = self._request("GET", "/v2/account/activities", params=dict(params))
+            flows.extend(CashFlow(id=r["id"], kind=r["activity_type"], date=str(r.get("date") or r.get("transaction_time", ""))[:10],
+                                  amount=float(r.get("net_amount") or 0)) for r in rows)
+            if len(rows) < _FLOW_PAGE:
+                return flows
+            params["page_token"] = rows[-1]["id"]
+
+    def _send(self, body: dict, client_order_id: str) -> LiveOrder:
+        body = {**body, "type": "market", "time_in_force": "day", "client_order_id": client_order_id}
         try:
-            resp = self._session.request(method, PAPER_BASE_URL + path, params=params, json=json, timeout=self._timeout)
-        except requests.RequestException as exc:
-            raise AlpacaError(f"{method} {path}: {exc}") from exc
-        if resp.status_code >= 400:
-            raise AlpacaError(f"{method} {path}: HTTP {resp.status_code}: {resp.text[:300]}", status_code=resp.status_code)
-        return resp.json()
+            return _live_order(self._request("POST", "/v2/orders", json=body))
+        except AlpacaError as exc:
+            if exc.status_code in _REJECTION_CODES:
+                return LiveOrder(client_order_id=client_order_id, ticker=body["symbol"], side=body["side"],
+                                 status="rejected", qty=float(body["qty"]) if "qty" in body else None,
+                                 notional=float(body["notional"]) if "notional" in body else None, reason=str(exc))
+            raise
+
+
+def _qty(qty: float) -> str:
+    return f"{qty:.9f}".rstrip("0").rstrip(".")
+
+
+def _live_order(row: dict) -> LiveOrder:
+    def num(key: str) -> float | None:
+        return float(row[key]) if row.get(key) not in (None, "") else None
+    return LiveOrder(
+        client_order_id=row["client_order_id"], ticker=row["symbol"], side=row["side"], status=row["status"],
+        qty=num("qty"), notional=num("notional"), order_id=row.get("id"),
+        filled_qty=num("filled_qty") or 0.0, filled_avg_price=num("filled_avg_price"),
+    )
 
 
 def _order_result(row: dict) -> OrderResult:

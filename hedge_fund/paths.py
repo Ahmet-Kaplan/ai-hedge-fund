@@ -21,6 +21,8 @@ ENV_PATH = USER_DIR / ".env"
 PAPER_DIR = USER_DIR / "paper"   # one ledger directory per paper fund
 KILL_PATH = USER_DIR / "KILL"    # exists → the paper runner sends nothing
 MARKET_DB_PATH = USER_DIR / "market.db"  # local prices + SEC data (free sources)
+LIVE_DIR = USER_DIR / "live"                 # the real-money account's ledger
+LIVE_SETTINGS_PATH = USER_DIR / "live.yaml"  # its settings (agent share, core ticker, ...)
 
 # The example mandate ships inside the package; it is copied out (never read
 # in place) so users edit their copy, not the install.
