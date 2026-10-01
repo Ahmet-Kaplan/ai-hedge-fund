@@ -1,3 +1,4 @@
 09:21:49 panel 2787 sessions x 22 instruments
 09:21:49 STEP 6 development backtests
 09:22:08   breakout 2016-07-01..2022-12-30 cap=100000 -> 90,077.07 (18s)
+09:22:40   meanrev 2016-07-01..2022-12-30 cap=100000 -> 172,689.06 (33s)
