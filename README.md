@@ -105,6 +105,42 @@ live in `~/.hedge-fund/paper/<fund>/`. Safety: `touch ~/.hedge-fund/KILL` stops 
 trading; a 15% drawdown from peak halts and flattens the fund until
 `aihf-paper resume`; `aihf-paper flatten --yes` does the same by hand.
 
+## Real-money account (core + satellite)
+
+`aihf-live` runs a **real** Alpaca account that can start small (fractional
+shares, from about $1 per order) and take regular deposits. It holds an S&P 500
+ETF **core**; a **satellite** copies the paper fund's active bets, but only with
+the share of the account the agents have earned:
+
+- The agent share starts at 0% (core only). After the paper fund's first passed
+  review (12 weekly rebalances beating SPY after costs) it becomes 20%, then
+  +10 points per passed review up to 50%; a failed review cuts it 10 points.
+  `aihf-live review` proposes the change and `--apply` sets it; nothing changes
+  on its own. If the satellite trails the core by 10% it is sold into the core
+  until the next review. The core is never sold because the market fell.
+- Below $2,000 the satellite is long-only; shorts need margin enabled at Alpaca,
+  `shorts_enabled: true`, and $2,000+ equity.
+- Deposits are invested the next run and are never counted as return
+  (`aihf-live report` shows deposits, value, and a time-weighted return next to
+  the core ETF's).
+
+Setup: add `ALPACA_LIVE_KEY_ID` / `ALPACA_LIVE_SECRET_KEY` (live keys; the
+client refuses paper keys), then
+
+```bash
+aihf-live init            # writes ~/.hedge-fund/live.yaml with confirm_live: false
+aihf-live run --dry-run   # review the plan; nothing is sent
+```
+
+Set `confirm_live: true` in `~/.hedge-fund/live.yaml`, then run `aihf-live run`
+each weekday after the paper command. `touch ~/.hedge-fund/KILL` stops both.
+
+Before funding an account, check yourself: whether Alpaca offers live accounts
+where you live, currency-conversion and transfer fees (small, frequent deposits
+can cost more in fees than they earn), the W-8BEN form, and your local tax
+treatment (in the UK a US broker account is not an ISA). This is an educational
+project, not investment or tax advice.
+
 ## Development
 
 ```bash
