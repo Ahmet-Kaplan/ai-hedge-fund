@@ -1,0 +1,59 @@
+{
+ "breakout": {
+  "config_hash": "b13d865ab364ee11",
+  "spec": {
+   "config": {
+    "atr_long": 100,
+    "atr_short": 20,
+    "channel": 55,
+    "exclude": [],
+    "min_expansion": 1.0,
+    "use_membership": true
+   },
+   "strategy": "breakout",
+   "version": "1.0.0"
+  }
+ },
+ "meanrev": {
+  "config_hash": "5775739dba617f29",
+  "spec": {
+   "config": {
+    "entry_z": 1.0,
+    "exclude": [],
+    "use_membership": true,
+    "window": 20
+   },
+   "strategy": "meanrev",
+   "version": "1.0.0"
+  }
+ },
+ "tsmom": {
+  "config_hash": "f23a4d3fb5b1ee22",
+  "spec": {
+   "config": {
+    "exclude": [],
+    "lookback": 252,
+    "scale": 1.0,
+    "skip": 21,
+    "use_membership": true,
+    "vol_lookback": 60
+   },
+   "strategy": "tsmom",
+   "version": "1.0.0"
+  }
+ },
+ "xsmom": {
+  "config_hash": "4d7783bca536dc8b",
+  "spec": {
+   "config": {
+    "exclude": [],
+    "lookback": 252,
+    "min_names": 3,
+    "skip": 21,
+    "use_membership": true
+   },
+   "strategy": "xsmom",
+   "version": "1.0.0"
+  }
+ }
+}

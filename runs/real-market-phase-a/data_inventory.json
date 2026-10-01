@@ -1,0 +1,580 @@
+{
+ "benchmark": "SPY",
+ "benchmark_first": "2016-07-01",
+ "benchmark_last": "2026-06-30",
+ "benchmark_sessions": 2512,
+ "cache_files": 70,
+ "instruments": {
+  "AAPL": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 40,
+   "history_range": [
+    "1980-12-12",
+    "2026-09-29"
+   ],
+   "member_sessions": 2512,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {
+    "2020-08-31": 4.0
+   },
+   "tiingo_symbol": "AAPL",
+   "zero_volume": 0
+  },
+  "AMZN": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 0,
+   "history_range": [
+    "1997-05-15",
+    "2026-09-29"
+   ],
+   "member_sessions": 2512,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {
+    "2022-06-06": 20.0
+   },
+   "tiingo_symbol": "AMZN",
+   "zero_volume": 0
+  },
+  "AVGO": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 40,
+   "history_range": [
+    "2009-08-06",
+    "2026-09-29"
+   ],
+   "member_sessions": 251,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {
+    "2024-07-15": 10.0
+   },
+   "tiingo_symbol": "AVGO",
+   "zero_volume": 0
+  },
+  "BAC": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 40,
+   "history_range": [
+    "1986-05-29",
+    "2026-09-29"
+   ],
+   "member_sessions": 250,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {},
+   "tiingo_symbol": "BAC",
+   "zero_volume": 0
+  },
+  "BRK.B": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 0,
+   "history_range": [
+    "1996-05-09",
+    "2026-09-29"
+   ],
+   "member_sessions": 2512,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {},
+   "tiingo_symbol": "BRK-B",
+   "zero_volume": 0
+  },
+  "GE": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 40,
+   "history_range": [
+    "1962-01-02",
+    "2026-09-29"
+   ],
+   "member_sessions": 252,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {
+    "2021-08-02": 0.125,
+    "2023-01-04": 1.281,
+    "2024-04-02": 1.253
+   },
+   "tiingo_symbol": "GE",
+   "zero_volume": 0
+  },
+  "GOOGL": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 9,
+   "history_range": [
+    "2004-08-19",
+    "2026-09-29"
+   ],
+   "member_sessions": 2512,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {
+    "2022-07-18": 20.0
+   },
+   "tiingo_symbol": "GOOGL",
+   "zero_volume": 0
+  },
+  "JNJ": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 40,
+   "history_range": [
+    "1970-01-02",
+    "2026-09-29"
+   ],
+   "member_sessions": 1761,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {},
+   "tiingo_symbol": "JNJ",
+   "zero_volume": 0
+  },
+  "JPM": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 40,
+   "history_range": [
+    "1983-12-30",
+    "2026-09-29"
+   ],
+   "member_sessions": 1507,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {},
+   "tiingo_symbol": "JPM",
+   "zero_volume": 0
+  },
+  "LLY": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 40,
+   "history_range": [
+    "1972-06-01",
+    "2026-09-29"
+   ],
+   "member_sessions": 250,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {},
+   "tiingo_symbol": "LLY",
+   "zero_volume": 0
+  },
+  "MA": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 40,
+   "history_range": [
+    "2006-05-25",
+    "2026-09-29"
+   ],
+   "member_sessions": 252,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {},
+   "tiingo_symbol": "MA",
+   "zero_volume": 0
+  },
+  "META": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 10,
+   "history_range": [
+    "2012-05-18",
+    "2026-09-29"
+   ],
+   "member_sessions": 2512,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {},
+   "tiingo_symbol": "META",
+   "zero_volume": 0
+  },
+  "MSFT": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 40,
+   "history_range": [
+    "1986-03-13",
+    "2026-09-29"
+   ],
+   "member_sessions": 2512,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {},
+   "tiingo_symbol": "MSFT",
+   "zero_volume": 0
+  },
+  "NVDA": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 40,
+   "history_range": [
+    "1999-01-22",
+    "2026-09-29"
+   ],
+   "member_sessions": 1003,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {
+    "2021-07-20": 4.0,
+    "2024-06-10": 10.0
+   },
+   "tiingo_symbol": "NVDA",
+   "zero_volume": 0
+  },
+  "PG": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 40,
+   "history_range": [
+    "1970-01-02",
+    "2026-09-29"
+   ],
+   "member_sessions": 252,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {},
+   "tiingo_symbol": "PG",
+   "zero_volume": 0
+  },
+  "SPY": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 40,
+   "history_range": [
+    "1993-01-29",
+    "2026-09-29"
+   ],
+   "member_sessions": 2512,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {},
+   "tiingo_symbol": "SPY",
+   "zero_volume": 0
+  },
+  "T": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 40,
+   "history_range": [
+    "1984-07-19",
+    "2026-09-29"
+   ],
+   "member_sessions": 252,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {
+    "2022-04-11": 1.324
+   },
+   "tiingo_symbol": "T",
+   "zero_volume": 0
+  },
+  "TSLA": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 0,
+   "history_range": [
+    "2010-06-29",
+    "2026-09-29"
+   ],
+   "member_sessions": 1002,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {
+    "2020-08-31": 5.0,
+    "2022-08-25": 3.0
+   },
+   "tiingo_symbol": "TSLA",
+   "zero_volume": 0
+  },
+  "UNH": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 40,
+   "history_range": [
+    "1990-03-26",
+    "2026-09-29"
+   ],
+   "member_sessions": 501,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {},
+   "tiingo_symbol": "UNH",
+   "zero_volume": 0
+  },
+  "V": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 40,
+   "history_range": [
+    "2008-03-19",
+    "2026-09-29"
+   ],
+   "member_sessions": 1258,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {},
+   "tiingo_symbol": "V",
+   "zero_volume": 0
+  },
+  "WFC": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 40,
+   "history_range": [
+    "1972-06-01",
+    "2026-09-29"
+   ],
+   "member_sessions": 251,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {},
+   "tiingo_symbol": "WFC",
+   "zero_volume": 0
+  },
+  "XOM": {
+   "cached": true,
+   "completeness_member_sessions": 1.0,
+   "delisting_event": null,
+   "dividends": 40,
+   "history_range": [
+    "1970-01-02",
+    "2026-09-29"
+   ],
+   "member_sessions": 1006,
+   "missing_close": 0,
+   "missing_member_sessions": 0,
+   "missing_sessions_in_window": 0,
+   "rows_in_window": 2512,
+   "splits": {},
+   "tiingo_symbol": "XOM",
+   "zero_volume": 0
+  }
+ },
+ "sec_cache_files": 1178,
+ "tiingo_requests": 0,
+ "universe": {
+  "snapshots": {
+   "2016-07-01": [
+    "AAPL",
+    "GOOGL",
+    "MSFT",
+    "XOM",
+    "BRK.B",
+    "AMZN",
+    "JNJ",
+    "META",
+    "GE",
+    "T"
+   ],
+   "2017-07-03": [
+    "AAPL",
+    "GOOGL",
+    "MSFT",
+    "AMZN",
+    "META",
+    "BRK.B",
+    "JNJ",
+    "XOM",
+    "JPM",
+    "WFC"
+   ],
+   "2018-07-02": [
+    "AAPL",
+    "AMZN",
+    "GOOGL",
+    "MSFT",
+    "META",
+    "BRK.B",
+    "JPM",
+    "XOM",
+    "JNJ",
+    "BAC"
+   ],
+   "2019-07-01": [
+    "MSFT",
+    "AMZN",
+    "AAPL",
+    "GOOGL",
+    "META",
+    "BRK.B",
+    "JNJ",
+    "JPM",
+    "V",
+    "XOM"
+   ],
+   "2020-07-01": [
+    "AAPL",
+    "MSFT",
+    "AMZN",
+    "GOOGL",
+    "META",
+    "BRK.B",
+    "V",
+    "JNJ",
+    "MA",
+    "PG"
+   ],
+   "2021-07-01": [
+    "AAPL",
+    "MSFT",
+    "AMZN",
+    "GOOGL",
+    "META",
+    "BRK.B",
+    "NVDA",
+    "JPM",
+    "V",
+    "JNJ"
+   ],
+   "2022-07-01": [
+    "AAPL",
+    "MSFT",
+    "GOOGL",
+    "AMZN",
+    "TSLA",
+    "BRK.B",
+    "UNH",
+    "JNJ",
+    "META",
+    "V"
+   ],
+   "2023-07-03": [
+    "AAPL",
+    "MSFT",
+    "GOOGL",
+    "AMZN",
+    "NVDA",
+    "TSLA",
+    "BRK.B",
+    "META",
+    "V",
+    "UNH"
+   ],
+   "2024-07-01": [
+    "MSFT",
+    "AAPL",
+    "NVDA",
+    "GOOGL",
+    "AMZN",
+    "META",
+    "BRK.B",
+    "LLY",
+    "TSLA",
+    "JPM"
+   ],
+   "2025-07-01": [
+    "NVDA",
+    "MSFT",
+    "AAPL",
+    "AMZN",
+    "GOOGL",
+    "META",
+    "AVGO",
+    "BRK.B",
+    "TSLA",
+    "JPM"
+   ]
+  },
+  "source": "runs/buffett-baseline/universe_top10.json",
+  "top_n": 10,
+  "union": [
+   "AAPL",
+   "GOOGL",
+   "MSFT",
+   "XOM",
+   "BRK.B",
+   "AMZN",
+   "JNJ",
+   "META",
+   "GE",
+   "T",
+   "JPM",
+   "WFC",
+   "BAC",
+   "V",
+   "MA",
+   "PG",
+   "NVDA",
+   "TSLA",
+   "UNH",
+   "LLY",
+   "AVGO"
+  ]
+ },
+ "window": [
+  "2016-07-01",
+  "2026-06-30"
+ ]
+}

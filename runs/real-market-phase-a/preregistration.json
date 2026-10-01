@@ -1,0 +1,163 @@
+{
+ "backtest": {
+  "capital_usd": 100000.0,
+  "costs_baseline": {
+   "adv_lookback": 20,
+   "commission_bps": 1.0,
+   "commission_min": 0.0,
+   "half_spread_bps": 2.0,
+   "impact_coef": 0.1,
+   "max_participation": 0.05,
+   "vol_lookback": 20
+  },
+  "execution": "next_open \u2014 orders decided on session D's close fill at D+1's open",
+  "portfolio": {
+   "gross_target": 1.0,
+   "long_only": true,
+   "min_score": 0.05,
+   "vol_lookback": 60,
+   "weighting": "inverse volatility of positive scores"
+  },
+  "risk": {
+   "allow_short": false,
+   "max_adv_participation": 0.05,
+   "max_cluster_weight": 1.0,
+   "max_daily_loss": 1.0,
+   "max_drawdown": 1.0,
+   "max_gross": 1.0,
+   "max_net": 1.0,
+   "max_position": 0.2,
+   "max_turnover": null,
+   "min_net": 0.0,
+   "vol_target": null
+  },
+  "risk_rationale": "measure the strategies' own behaviour; operational breakers (drawdown halt, daily loss, vol target) are switched off so they cannot mask or create an edge",
+  "slippage_model": "half-spread + square-root impact (impact_coef * daily vol * sqrt(order/ADV notional))"
+ },
+ "classification": {
+  "EVIDENCE_SUPPORTS_FURTHER_RESEARCH": "all gates pass on development AND the holdout passes AND the strategy is not fragile at 2x costs",
+  "INSUFFICIENT_EVIDENCE": "a required statistic lacks sample, or development Sharpe > 0 but any gate fails",
+  "REJECT": "development net Sharpe <= 0, or the locked holdout fails its criterion",
+  "note": "criteria fixed here; they are not changed after results"
+ },
+ "cost_stress": {
+  "applies_to": "commission, half-spread, impact coefficient",
+  "fragile_if": "Sharpe at 2x costs <= 0, or below half of the baseline Sharpe",
+  "multipliers": [
+   1.0,
+   1.5,
+   2.0,
+   3.0
+  ],
+  "window": "development only (the holdout is not re-run)"
+ },
+ "data": {
+  "benchmark": "SPY total return (dividends reinvested) \u2014 the portfolio is credited dividends",
+  "corporate_actions": "Tiingo splitFactor (incl. GE spin-offs encoded as factors) and divCash",
+  "financial_datasets": "not used (policy fail-closed, key absent)",
+  "panel_window": [
+   "2015-06-01",
+   "2026-06-30"
+  ],
+  "prices": "Tiingo daily OHLCV (split-adjusted, restated per as-of view), local cache, offline",
+  "risk_free_rate": "0 (no rate series in the cache); Sharpe is excess over zero",
+  "universe": "runs/buffett-baseline/universe_top10.json \u2014 survivorship-aware PIT top-10 by market cap, annual reconstitution 2016-07-01..2025-07-01; membership = latest snapshot on or before the session",
+  "warmup_note": "bars before 2016-07-01 are history only; no instrument is a member before the first snapshot"
+ },
+ "ensemble": "only if at least two strategies are EVIDENCE_SUPPORTS_FURTHER_RESEARCH; evidence from development only",
+ "family": "phase-a-reference",
+ "holdout_pass_criterion": {
+  "annualized_sharpe_min": 0.5,
+  "max_drawdown_max": 0.25,
+  "total_return_min": 0.0
+ },
+ "periods": {
+  "development": [
+   "2016-07-01",
+   "2022-12-30"
+  ],
+  "embargo_calendar_days": 30,
+  "holdout_rule": "evaluated exactly once per strategy via LockedHoldout; fresh capital at holdout start; no change to any config after a holdout result",
+  "locked_holdout": [
+   "2023-02-01",
+   "2026-06-30"
+  ]
+ },
+ "preregistration_hash": "b37d3f1b31a356e781eae87266a08588cc6eb7eba0892a5633dcb8032c8fa059",
+ "rebalance_rationale": "momentum signals use 252-day lookbacks (monthly); mean reversion (20-day) and breakout (55-day channel) are short-horizon (weekly). Fixed before any result was seen.",
+ "small_account": {
+  "capital": 200.0,
+  "costs": {
+   "commission_min_per_order": 1.0,
+   "half_spread_bps": 5.0,
+   "modelled_as": "commission_min=1.0, half_spread_bps=10 (spread+slippage), impact_coef 0.1",
+   "slippage_bps": 5.0
+  },
+  "currency_note": "EUR 200 modelled as 200 USD-equivalent units; FX not modelled",
+  "instruments": "fractional (1e-6 shares), min order notional 1.0",
+  "variants": [
+   "raw: every order the strategy produces",
+   "economics_filtered: drop orders whose expected edge (development round-trip expectancy in bp from the 100k development run, never the holdout) does not clear round-trip cost + 20bp"
+  ],
+  "window": "development only"
+ },
+ "strategies": {
+  "breakout": {
+   "config_hash": "b13d865ab364ee11",
+   "rebalance": "weekly"
+  },
+  "meanrev": {
+   "config_hash": "5775739dba617f29",
+   "rebalance": "weekly"
+  },
+  "tsmom": {
+   "config_hash": "f23a4d3fb5b1ee22",
+   "rebalance": "monthly"
+  },
+  "xsmom": {
+   "config_hash": "4d7783bca536dc8b",
+   "rebalance": "monthly"
+  }
+ },
+ "title": "Phase A: out-of-sample evidence for four frozen reference strategies on real PIT data",
+ "validation": {
+  "bootstrap": {
+   "alpha": 0.05,
+   "block_sessions": 21,
+   "samples": 2000,
+   "seed": 20261001
+  },
+  "cpcv": {
+   "k_test": 2,
+   "n_groups": 6
+  },
+  "dsr": "n_trials = distinct configs in the registry family; SR variance across those trials",
+  "gates_file": "configs/validation-gates.yaml",
+  "gates_hash": "2fc90f4ad972f482",
+  "monte_carlo": {
+   "ruin_level": 0.5,
+   "samples": 2000,
+   "seed": 20261001,
+   "what": "reshuffled round-trip P&L"
+  },
+  "pbo": {
+   "configs": "the four strategies' daily development returns",
+   "n_splits": 8
+  },
+  "psr_benchmark_sharpe": 0.0,
+  "purged_kfold": {
+   "embargo_sessions": 5,
+   "k": 6,
+   "label_horizon_sessions": {
+    "monthly": 21,
+    "weekly": 5
+   }
+  },
+  "sufficiency": {
+   "min_daily_observations": 252,
+   "min_round_trips": 30,
+   "otherwise": "INSUFFICIENT_EVIDENCE (no number reported)"
+  },
+  "walk_forward": "frozen configs (nothing is fitted): consecutive calendar-year test windows 2017..2022 on the development backtest; statistic = share of windows with positive net Sharpe"
+ }
+}
