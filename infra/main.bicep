@@ -23,13 +23,21 @@ param fundName string
 @description('Cron for the tick, in UTC. Default 23:30 UTC Mon-Fri = 18:30 EST / 19:30 EDT, after the 16:00 ET close in both.')
 param cronExpression string = '30 23 * * 1-5'
 
+// A scheduled job whose fund does not exist yet just fails nightly. Park it on
+// a manual trigger until the share is bootstrapped, then set this true.
+@description('Run on the cron. False leaves the job manual-trigger only.')
+param enableSchedule bool = true
+
 @description('Image to run. azd overrides this; the placeholder only lets the template validate.')
 param containerImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
 
 @description('Model id passed to --model. Must be azure/<deployment> to use the managed identity.')
-param llmModel string = 'azure/gpt-4o'
+param llmModel string = 'azure/gpt-5-mini'
 
-@description('Endpoint of an existing Azure OpenAI resource, e.g. https://my-aoai.openai.azure.com')
+// Use the host the account actually advertises. For an AIServices-kind account
+// that is cognitiveservices.azure.com; the openai.azure.com form returns 401
+// even with the correct role granted (verified against pcTestFoundary).
+@description('Endpoint of the Azure AI/OpenAI resource, e.g. https://<name>.cognitiveservices.azure.com/')
 param azureOpenAiEndpoint string
 
 @description('Name of that Azure OpenAI account, for the role assignment. Empty skips it (grant the role yourself).')
@@ -189,11 +197,15 @@ resource job 'Microsoft.App/jobs@2024-03-01' = {
   properties: {
     environmentId: env.id
     configuration: {
-      triggerType: 'Schedule'
-      scheduleTriggerConfig: {
+      triggerType: enableSchedule ? 'Schedule' : 'Manual'
+      // One replica, one completion either way: the ledger is a hash chain, and
+      // two writers would race to append the same session.
+      scheduleTriggerConfig: enableSchedule ? {
         cronExpression: cronExpression
-        // One replica, one completion: the ledger is a hash chain, and two
-        // writers would race to append the same session.
+        parallelism: 1
+        replicaCompletionCount: 1
+      } : null
+      manualTriggerConfig: enableSchedule ? null : {
         parallelism: 1
         replicaCompletionCount: 1
       }

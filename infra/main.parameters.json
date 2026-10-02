@@ -6,7 +6,7 @@
     "location": { "value": "${AZURE_LOCATION}" },
     "fundName": { "value": "${FUND_NAME}" },
     "cronExpression": { "value": "${TICK_CRON=30 23 * * 1-5}" },
-    "llmModel": { "value": "${LLM_MODEL=azure/gpt-4o}" },
+    "llmModel": { "value": "${LLM_MODEL=azure/gpt-5-mini}" },
     "azureOpenAiEndpoint": { "value": "${AZURE_OPENAI_ENDPOINT}" },
     "azureOpenAiAccountName": { "value": "${AZURE_OPENAI_ACCOUNT_NAME=}" }
   }

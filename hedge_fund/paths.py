@@ -36,7 +36,11 @@ def ensure_mandates_dir() -> Path:
     """Create the mandates dir on first use, seeded with the example."""
     if not MANDATES_DIR.exists():
         MANDATES_DIR.mkdir(parents=True)
-        shutil.copy(EXAMPLE_MANDATE, MANDATES_DIR / "example.yaml")
+        # copyfile, not copy: copy() also replicates the source's mode, and the
+        # chmod behind that fails outright on filesystems that do not implement
+        # it — an SMB mount such as Azure Files raises EPERM and takes the whole
+        # command down. Nothing here depends on the mandate's permission bits.
+        shutil.copyfile(EXAMPLE_MANDATE, MANDATES_DIR / "example.yaml")
     return MANDATES_DIR
 
 
