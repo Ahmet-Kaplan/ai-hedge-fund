@@ -9,6 +9,13 @@
     Nothing to score yet. Analyst records are built from completed
     simulations — <a href="/simulate">run one</a> and this page fills in.
   </div>
+{% elif not scores %}
+  <div class="notice">
+    {{ sources }} stored result{{ "" if sources == 1 else "s" }} on disk, but
+    no calls inside the last {{ window_weeks }} weeks. The record is
+    deliberately short-memoried — <a href="/simulate">run a recent window</a>
+    and this page fills in.
+  </div>
 {% elif best %}
   <div class="panel" style="padding:20px">
     <div style="font-size:19px"><strong>{{ best.analyst }}</strong></div>
@@ -44,7 +51,7 @@
   </div>
 {% endif %}
 
-{% if sources %}
+{% if scores %}
 <h2>Record</h2>
 <div class="panel">
   <table>
@@ -127,7 +134,9 @@
   <p style="margin:0">Edge measures the call, not the fill. Orders execute at
   the next close after a decision, so realized P&amp;L differs from these
   figures by a session of slippage. Built from {{ sources }} stored
-  result{{ "" if sources == 1 else "s" }}.</p>
+  result{{ "" if sources == 1 else "s" }}, counting only calls made in the
+  last {{ window_weeks }} weeks — an older simulation still on disk
+  contributes nothing here, so a record can shrink as its calls age out.</p>
 </div>
 {% endif %}
 

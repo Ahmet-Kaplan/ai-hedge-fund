@@ -26,6 +26,7 @@ apportionment, not a replay of the sizing arithmetic.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date as _date, timedelta
 from math import copysign, fsum, inf, isfinite, sqrt
 
 from hedge_fund.backtesting.fund import FundBacktestResult
@@ -46,6 +47,19 @@ MIN_CALLS_TO_RANK = 20
 # within a date and the statistics run across dates, so a mandate holding
 # thirty names does not look thirty times more certain than one holding one.
 MIN_REBALANCES_TO_RANK = 12
+
+# How far back the record reaches. Older calls are dropped rather than
+# averaged in: an edge is evidence about the regime it was earned in, and a
+# record that never forgets quietly becomes a claim about a market that has
+# moved on. Six months is also the default simulation window, so one run of
+# the form fills the page exactly.
+#
+# This interacts with the ranking bars above: a weekly mandate rebalances
+# about 26 times in the window, so clearing 12 rebalances is reachable but
+# not automatic, and a mandate that trades monthly can no longer be ranked
+# at all. That is intended — six monthly observations cannot distinguish
+# skill from luck, and the page should say so rather than pretend.
+WINDOW_WEEKS = 26
 
 # How many standard errors the mean edge must sit above zero.
 #
@@ -248,6 +262,16 @@ def calls_from_result(result: FundBacktestResult) -> list[Call]:
                     fill=fills.get(signal.ticker),
                 ))
     return calls
+
+
+def within_window(calls: list[Call], *, today: _date, weeks: int = WINDOW_WEEKS) -> list[Call]:
+    """Keep only calls made in the trailing window ending *today*.
+
+    The cutoff is inclusive of its own date and compares ISO strings, which
+    order identically to the dates they encode.
+    """
+    cutoff = (today - timedelta(weeks=weeks)).isoformat()
+    return [call for call in calls if call.date >= cutoff]
 
 
 def deduplicate(calls: list[Call]) -> list[Call]:

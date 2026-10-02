@@ -167,7 +167,7 @@ def test_an_unknown_analyst_is_refused(client: TestClient, signed_in: dict, name
 def test_a_registered_analyst_renders_without_any_calls(client: TestClient, signed_in: dict) -> None:
     response = client.get("/analysts/graham", headers=signed_in)
     assert response.status_code == 200
-    assert "has not been consulted" in response.text
+    assert "made no calls" in response.text
 
 
 def test_an_unreadable_result_file_does_not_break_the_page(

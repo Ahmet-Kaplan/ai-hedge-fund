@@ -6,8 +6,10 @@
 
 {% if score is none %}
   <div class="notice">
-    {{ analyst }} has not been consulted in any stored simulation. Add them to
-    a mandate's pod and <a href="/simulate">run one</a>.
+    {{ analyst }} made no calls in the last {{ window_weeks }} weeks. Either
+    no mandate put them on a pod, or their calls are older than the window
+    this page reads. Add them to a pod and <a href="/simulate">run a recent
+    window</a>.
   </div>
 {% else %}
 <div class="metrics">
@@ -113,7 +115,8 @@
   view's own trade, and it fills one session after <strong>Price</strong>.
   A dash there means the fund held its position rather than that the
   analyst said nothing.
-  Built from {{ sources }} stored result{{ "" if sources == 1 else "s" }}.
+  Built from {{ sources }} stored result{{ "" if sources == 1 else "s" }},
+  limited to calls made in the last {{ window_weeks }} weeks.
 </div>
 {% endif %}
 

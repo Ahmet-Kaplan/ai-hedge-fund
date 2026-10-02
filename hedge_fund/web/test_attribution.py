@@ -344,6 +344,60 @@ def test_deduplication_keeps_the_first_occurrence() -> None:
     assert merged[0].forward_return == pytest.approx(0.3)
 
 
+# ---- the record only reaches back so far -----------------------------------
+
+def window_calls(dates: list[str]) -> list[attribution.Call]:
+    """One graham call on AAPL at each of *dates*, priced but unscored."""
+    fund_spec = spec(("graham", 1.0))
+    calls = []
+    for date in dates:
+        only = cycle(date, {"AAPL": 100.0}, [signal("graham", "AAPL", 1.0)],
+                     {"AAPL": 1.0}, fund_spec)
+        calls.extend(attribution.calls_from_result(result_of(session(date, {}, only))))
+    return calls
+
+
+def test_a_call_older_than_the_window_is_dropped() -> None:
+    today = _date(2026, 7, 1)
+    stale = (today - timedelta(weeks=attribution.WINDOW_WEEKS, days=1)).isoformat()
+
+    assert attribution.within_window(window_calls([stale]), today=today) == []
+
+
+def test_a_call_on_the_cutoff_itself_is_kept() -> None:
+    """The boundary is inclusive, so a call exactly at the edge still counts."""
+    today = _date(2026, 7, 1)
+    edge = (today - timedelta(weeks=attribution.WINDOW_WEEKS)).isoformat()
+
+    assert len(attribution.within_window(window_calls([edge]), today=today)) == 1
+
+
+def test_the_window_keeps_recent_calls_and_drops_old_ones_together() -> None:
+    """A long result spanning the cutoff is trimmed, not accepted or rejected whole."""
+    today = _date(2026, 7, 1)
+    kept = (today - timedelta(weeks=2)).isoformat()
+    dropped = (today - timedelta(weeks=60)).isoformat()
+
+    recent = attribution.within_window(window_calls([dropped, kept]), today=today)
+
+    assert [call.date for call in recent] == [kept]
+
+
+def test_an_aged_out_record_scores_as_nothing_rather_than_as_a_winner() -> None:
+    """An analyst whose every call fell out of the window must not keep a rank.
+
+    A stale leaderboard entry is worse than an empty one: it recommends on
+    evidence the page is no longer willing to show.
+    """
+    today = _date(2026, 7, 1)
+    old = [(today - timedelta(weeks=60 + n)).isoformat() for n in range(20)]
+
+    recent = attribution.within_window(window_calls(old), today=today)
+
+    assert attribution.score(recent) == []
+    assert attribution.best(attribution.score(recent)) is None
+
+
 # ---- the recommendation refuses to overclaim -------------------------------
 
 def test_no_winner_is_named_on_a_thin_record() -> None:
