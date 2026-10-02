@@ -22,6 +22,7 @@ class LiveNavRow(BaseModel):
     net_flow: float                     # deposits − withdrawals since the previous row
     core_value: float
     satellite_value: float
+    crypto_value: float = 0.0                # the crypto half (never part of the satellite)
     core_close: float
     satellite_return: float | None = None   # satellite holdings' return since the previous row
 

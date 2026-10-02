@@ -18,6 +18,7 @@ class LiveReport(BaseModel):
     core_return: float               # the core ETF alone over the same dates
     core_value: float
     satellite_value: float
+    crypto_value: float
     agent_share: float
     satellite_halted: bool
     satellite_vs_core: float | None  # since the latest review
@@ -37,7 +38,7 @@ def build_live_report(ledger: LiveLedger, settings: LiveSettings) -> LiveReport 
         start=rows[0].date, end=last.date, deposited=round(ledger.total_deposited(), 2), equity=last.equity,
         gain=round(last.equity - ledger.total_deposited(), 2), time_weighted_return=round(twr - 1, 6),
         core_return=round(last.core_close / rows[0].core_close - 1, 6), core_value=last.core_value,
-        satellite_value=last.satellite_value, agent_share=settings.agent_share,
+        satellite_value=last.satellite_value, crypto_value=last.crypto_value, agent_share=settings.agent_share,
         satellite_halted=ledger.satellite_halted(),
         satellite_vs_core=ledger.satellite_excess(review) if review else None,
     )

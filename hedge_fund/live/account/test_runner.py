@@ -148,3 +148,49 @@ def test_core_only_run_ignores_unpriceable_paper_names(env):
     result = run(env, client, cash_buffer_pct=0.0)            # share 0: ZZZ has no price, and needs none
     assert result.status == "submitted"
     assert client.sent == [("SPY", "buy", {"notional": 100.0})]
+
+
+CRYPTO = {"BTC/USD": 60_000.0, "ETH/USD": 3_000.0, "SOL/USD": 150.0}
+
+
+def crypto_marks(names, day):
+    return {n: CRYPTO[n] for n in names}
+
+
+def test_deposit_is_split_between_the_halves(env):
+    env["live"].mark_dry_run_done()
+    client = FakeLive(cash=200.0)
+    s = LiveSettings(confirm_live=True, crypto_share=0.5, cash_buffer_pct=0.0)
+    result = submit_live(s, client, FakeDataClient(CLOSES), env["live"], env["paper"], now=MON,
+                         kill_path=env["kill"], crypto_marks=crypto_marks)
+    bought = {t: kw["notional"] for t, side, kw in client.sent}
+    assert bought == {"SPY": 100.0, "BTC/USD": 60.0, "ETH/USD": 30.0, "SOL/USD": 10.0}
+    assert result.target["BTC/USD"] == pytest.approx(0.3)
+
+
+def test_rebalance_never_sells_crypto_held_at_target(env):
+    env["live"].mark_dry_run_done()
+    holdings = {"SPY": 0.2, "BTC/USD": 0.001, "ETH/USD": 0.01, "SOL/USD": 0.0666667}   # $100 SPY + $100 crypto 60/30/10
+    client = FakeLive(holdings=holdings, cash=0.0)
+    s = LiveSettings(confirm_live=True, crypto_share=0.5)
+    run_result = submit_live(s, client, FakeDataClient(CLOSES), env["live"], env["paper"], now=MON,
+                             kill_path=env["kill"], crypto_marks=crypto_marks)
+    assert run_result.status == "nothing_to_do" and client.sent == []
+
+
+def test_crypto_without_a_price_source_is_an_error(env):
+    env["live"].mark_dry_run_done()
+    with pytest.raises(ValueError, match="crypto"):
+        submit_live(LiveSettings(confirm_live=True, crypto_share=0.5), FakeLive(cash=100.0), FakeDataClient(CLOSES),
+                    env["live"], env["paper"], now=MON, kill_path=env["kill"])
+
+
+def test_reconcile_values_crypto_separately_from_the_satellite(env):
+    live = env["live"]
+    client = FakeLive(holdings={"SPY": 0.2, "BTC/USD": 0.001}, cash=0.0)
+    live.save_holdings("2026-08-20", {"SPY": 0.2, "BTC/USD": 0.001})
+    row = reconcile_live(LiveSettings(crypto_share=0.5), client, FakeDataClient(CLOSES), live,
+                         session="2026-08-21", crypto_marks=crypto_marks)
+    assert (row.core_value, row.crypto_value, row.satellite_value) == (100.0, 60.0, 0.0)
+    assert row.satellite_return is None             # crypto is not the satellite
+    assert row.equity == 160.0
