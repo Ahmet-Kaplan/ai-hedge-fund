@@ -15,7 +15,9 @@
   analyst at each rebalance. Agents run blind — no ticker, industry or
   calendar date in the prompt — so the result cannot lean on what the model
   remembers about these companies. Expect minutes, not seconds, and real
-  inference cost per rebalance.
+  inference and market-data cost: both scale with the number of names times
+  the number of rebalances in the window, so doubling the universe doubles
+  the bill.
 </div>
 
 <form method="post" action="/simulate">
@@ -25,7 +27,7 @@
   </select>
 
   <label for="universe">Universe</label>
-  <input id="universe" name="universe" value="AAPL,NVDA,MSFT"
+  <input id="universe" name="universe" value="{{ universe }}"
          placeholder="comma or space separated" required>
 
   <div class="row">

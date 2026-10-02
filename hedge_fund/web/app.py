@@ -34,6 +34,20 @@ log = logging.getLogger(__name__)
 HERE = Path(__file__).resolve().parent
 DEFAULT_WINDOW_WEEKS = 26
 
+# What the universe field starts with. A spread across sectors rather than a
+# ranked index: the data provider exposes only per-ticker endpoints and no
+# listing or screener, so "the largest N by volume" cannot be derived here —
+# any such list has to come from outside and be pasted in. Nothing caps the
+# field's length; this is a starting point, not a limit.
+DEFAULT_UNIVERSE = [
+    "AAPL", "MSFT", "NVDA", "AVGO", "ORCL", "CRM", "AMD",
+    "GOOGL", "META", "NFLX",
+    "AMZN", "TSLA", "HD", "COST", "WMT", "PG", "KO", "MCD",
+    "UNH", "JNJ", "LLY", "ABBV",
+    "JPM", "BAC", "V", "MA",
+    "XOM", "CVX", "CAT", "HON",
+]
+
 app = FastAPI(title="AI Hedge Fund", docs_url=None, redoc_url=None)
 templates = Jinja2Templates(directory=str(HERE / "templates"))
 runs = Runs()
@@ -90,6 +104,7 @@ async def simulate_form(request: Request) -> HTMLResponse:
         "principal": principal,
         "mandates": _mandates(),
         "analysts": sorted(ALPHA_MODEL_REGISTRY),
+        "universe": ",".join(DEFAULT_UNIVERSE),
         "start": start,
         "end": end,
         "busy": runs.active(),
@@ -160,6 +175,7 @@ async def analysts(request: Request) -> HTMLResponse:
         "min_calls": attribution.MIN_CALLS_TO_RANK,
         "min_rebalances": attribution.MIN_REBALANCES_TO_RANK,
         "min_t": attribution.MIN_T_STAT,
+        "window_weeks": attribution.WINDOW_WEEKS,
         "sources": sources,
         "roster": sorted(ALPHA_MODEL_REGISTRY),
     })
@@ -183,6 +199,7 @@ async def analyst_detail(request: Request, analyst: str) -> HTMLResponse:
         "min_calls": attribution.MIN_CALLS_TO_RANK,
         "min_rebalances": attribution.MIN_REBALANCES_TO_RANK,
         "min_t": attribution.MIN_T_STAT,
+        "window_weeks": attribution.WINDOW_WEEKS,
         "sources": sources,
     })
 
@@ -221,6 +238,10 @@ def _all_calls() -> tuple[list[attribution.Call], int]:
 
     Files arrive newest first, which is what lets the deduplication keep the
     most recent replay of any rebalance that two overlapping windows share.
+
+    Only the trailing window is returned; a file whose every rebalance falls
+    outside it still counts as a source, because it was read and found to
+    have nothing current to say.
     """
     calls: list[attribution.Call] = []
     sources = 0
@@ -232,7 +253,8 @@ def _all_calls() -> tuple[list[attribution.Call], int]:
             continue
         calls.extend(attribution.calls_from_result(result))
         sources += 1
-    return attribution.deduplicate(calls), sources
+    recent = attribution.within_window(calls, today=_date.today())
+    return attribution.deduplicate(recent), sources
 
 
 def _paper_funds() -> list[dict]:
