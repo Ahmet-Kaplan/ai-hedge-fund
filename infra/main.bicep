@@ -46,11 +46,11 @@ param azureOpenAiAccountName string = ''
 @description('Deploy the browser dashboard alongside the job.')
 param enableDashboard bool = true
 
-// Empty is a safe default, not a convenient one: with no provider configured
-// the platform cannot sign anyone in, and the app refuses every request
-// because AIHF_WEB_REQUIRE_AUTH stays true. The dashboard is reachable but
-// locked until a real client id is supplied.
-@description('Entra ID application (client) id for dashboard sign-in. Empty leaves the dashboard locked.')
+// Empty means no sign-in provider, and therefore nothing that can mint a
+// principal header. The dashboard then runs unauthenticated behind the
+// address allow-list; see AIHF_WEB_REQUIRE_AUTH below for why demanding the
+// header in that state protects nobody and locks out the browser.
+@description('Entra ID application (client) id for dashboard sign-in. Empty runs the dashboard open behind the allow-list.')
 param entraClientId string = ''
 
 // Always-on: a dashboard that cold-starts on every visit is not a dashboard.
@@ -450,11 +450,20 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = if (enableDashboard) {
               value: llmModel
             }
             {
-              // Fail closed. Nothing in the deployment should ever set this
-              // to false; it exists so the app can run locally without a
-              // tenant, and the default is what protects the deployed copy.
+              // Demand a principal header only when something is actually
+              // able to produce one. The header is trustworthy solely because
+              // EasyAuth strips client-supplied copies and injects its own;
+              // with entraClientId empty that layer does not exist, so the
+              // check stops no attacker — a forged header is accepted — while
+              // stopping every real browser, which never sends one. That is
+              // not a control, it is a locked door with no walls.
+              //
+              // So: require it once sign-in exists, and until then rely on
+              // the allow-list, which is the control that genuinely holds.
+              // dashboardIpRules refuses to deploy an open app, so these two
+              // cannot both be off.
               name: 'AIHF_WEB_REQUIRE_AUTH'
-              value: 'true'
+              value: empty(entraClientId) ? 'false' : 'true'
             }
           ]
           volumeMounts: [
