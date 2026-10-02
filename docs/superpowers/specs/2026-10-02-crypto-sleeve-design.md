@@ -133,9 +133,9 @@ overlay does not beat the rule-only shadow, the overlay is switched off
 
 ## 7. Preconditions (user-side, before any real crypto)
 
-- Confirm Alpaca offers crypto to the user's live account in the UK; if not,
-  the crypto half needs a different regulated broker (a separate spec).
-- Confirm the Alpaca crypto fee tier and set `fee_bps`.
+- ✅ Confirmed 2026-10-02: Alpaca offers crypto to the user's live account.
+- ✅ Fee tier confirmed: level 1 (< $100k 30-day volume) is 0.15% maker /
+  0.25% taker. The runner sends market orders (taker), so `fee_bps = 25`.
 - UK tax treatment of crypto differs from shares (not tax advice).
 
 ## 8. Order of work
