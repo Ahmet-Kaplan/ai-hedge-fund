@@ -38,6 +38,7 @@ textual = "^8.2.8"
 aihf = "hedge_fund.run:main"
 aihf-paper = "hedge_fund.live.cli:main"
 aihf-live = "hedge_fund.live.account.cli:main"
+aihf-crypto = "hedge_fund.crypto.cli:main"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
