@@ -100,7 +100,14 @@ def main() -> None:
     except CongressDataError as exc:
         console.print(f"[red]{exc}[/]")
         sys.exit(1)
-    except (FundHalted, NothingDue, LedgerError) as exc:
+    except NothingDue as exc:
+        # Success, not failure: the fund is already current. The scheduled tick
+        # runs more often than the market produces sessions, so an idle run is
+        # the expected case on a weekend. Exiting non-zero here would file two
+        # Failed executions a week and bury the ones that matter.
+        console.print(f"[yellow]{exc}[/]")
+        return
+    except (FundHalted, LedgerError) as exc:
         console.print(f"[red]{exc}[/]")
         sys.exit(1)
 

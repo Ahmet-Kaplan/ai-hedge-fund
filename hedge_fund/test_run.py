@@ -160,10 +160,13 @@ def test_paper_flow_create_tick_status_halt_resume(tmp_path, monkeypatch, capsys
     assert record["session"] == "2025-01-06" and record["decision"] is not None and record["executed"] is None
     assert "decided on" in output.err and "executes next close" in output.err
 
-    with pytest.raises(SystemExit) as exc:
-        _main(monkeypatch, "paper", "tick", "alpha")  # nothing new has closed
-    assert exc.value.code == 1
-    assert "no completed SPY session after 2025-01-06" in capsys.readouterr().err
+    # Nothing new has closed. That is an idle run, not a failure: the cron
+    # fires daily and the market does not, so this must exit 0 or the job
+    # history fills with Failed executions that nobody reads.
+    _main(monkeypatch, "paper", "tick", "alpha")
+    output = capsys.readouterr()
+    assert "no completed SPY session after 2025-01-06" in output.err
+    assert output.out == ""  # and it records nothing
 
     set_today("2025-01-08")
     _main(monkeypatch, "paper", "tick", "alpha")
