@@ -1,0 +1,26 @@
+# azd definition for the scheduled paper-trading job.
+#
+#   azd env new aihf-dev
+#   azd env set FUND_NAME alpha
+#   azd env set AZURE_OPENAI_ENDPOINT https://<resource>.openai.azure.com
+#   azd up
+#
+# No secret belongs in an azd env: the Financial Datasets key goes into Key
+# Vault after `azd up`, using the setSecretCommand the deployment outputs.
+name: ai-hedge-fund-paper
+metadata:
+  template: ai-hedge-fund-paper@0.0.1
+
+infra:
+  provider: bicep
+  path: infra
+  module: main
+
+services:
+  tick:
+    project: .
+    language: python
+    host: containerapp
+    docker:
+      path: ./Dockerfile
+      context: .

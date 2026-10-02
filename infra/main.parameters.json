@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "appName": { "value": "aihf" },
+    "location": { "value": "${AZURE_LOCATION}" },
+    "fundName": { "value": "${FUND_NAME}" },
+    "cronExpression": { "value": "${TICK_CRON=30 23 * * 1-5}" },
+    "llmModel": { "value": "${LLM_MODEL=azure/gpt-4o}" },
+    "azureOpenAiEndpoint": { "value": "${AZURE_OPENAI_ENDPOINT}" },
+    "azureOpenAiAccountName": { "value": "${AZURE_OPENAI_ACCOUNT_NAME=}" }
+  }
+}

@@ -1,0 +1,17 @@
+# Keep the build context to source only. .venv in particular is ~500MB of
+# host-platform wheels that would be wrong inside the image anyway.
+.venv/
+.git/
+.github/
+infra/
+assets/
+**/__pycache__/
+**/*.pyc
+**/test_*.py
+conftest.py
+poetry.lock
+uv.lock
+.env
+.env.*
+*.md
+!README.md
