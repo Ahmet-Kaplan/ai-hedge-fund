@@ -20,8 +20,10 @@ from datetime import date, datetime
 from pathlib import Path
 
 from hedge_fund.brokers.alpaca import AlpacaLiveClient
+from hedge_fund.data.crypto_prices import CryptoPriceSource, crypto_closes
 from hedge_fund.data.factory import open_data_client
 from hedge_fund.data.sessions import NEW_YORK
+from hedge_fund.data.store import MarketStore
 from hedge_fund.live.account.ledger import LiveLedger
 from hedge_fund.live.account.report import build_live_report
 from hedge_fund.live.account.review import apply_review, propose_review
@@ -30,7 +32,7 @@ from hedge_fund.live.account.settings import LiveSettings, load_settings, save_s
 from hedge_fund.live.launchd import notify
 from hedge_fund.live.ledger import Ledger
 from hedge_fund.live.runner import session_to_reconcile
-from hedge_fund.paths import KILL_PATH, LIVE_SETTINGS_PATH
+from hedge_fund.paths import KILL_PATH, LIVE_SETTINGS_PATH, MARKET_DB_PATH
 from hedge_fund.tui.keys import apply_credentials
 
 logger = logging.getLogger("aihf-live")
@@ -80,13 +82,22 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
+def _crypto_marks(names: list[str], day: str) -> dict[str, float]:
+    """Free Alpaca crypto closes for the UTC day `day`, cached in the market store."""
+    closes = crypto_closes(MarketStore(MARKET_DB_PATH), CryptoPriceSource(), names, day, day)
+    missing = [n for n in names if day not in closes[n]]
+    if missing:
+        raise ValueError(f"no crypto close on {day} for {', '.join(missing)}")
+    return {n: closes[n][day] for n in names}
+
+
 def _reconcile(args, settings, path, ledger) -> int:
     client = AlpacaLiveClient()
     session = session_to_reconcile(client, datetime.now(NEW_YORK))
     with open_data_client() as data:
-        row = reconcile_live(settings, client, data, ledger, session=session)
+        row = reconcile_live(settings, client, data, ledger, session=session, crypto_marks=_crypto_marks)
     print(f"{session}: equity ${row.equity:,.2f} · core ${row.core_value:,.2f} · satellite ${row.satellite_value:,.2f}"
-          f" · deposits ${row.net_flow:,.2f}")
+          f" · crypto ${row.crypto_value:,.2f} · deposits ${row.net_flow:,.2f}")
     return 0
 
 
@@ -94,7 +105,8 @@ def _submit(args, settings, path, ledger) -> int:
     client = AlpacaLiveClient()
     with open_data_client() as data:
         result = submit_live(settings, client, data, ledger, Ledger.for_fund(settings.paper_fund),
-                             now=datetime.now(NEW_YORK), dry_run=args.dry_run, kill_path=KILL_PATH)
+                             now=datetime.now(NEW_YORK), dry_run=args.dry_run, kill_path=KILL_PATH,
+                             crypto_marks=_crypto_marks)
     print(f"{result.session}: {result.status} {result.detail}")
     for t, w in sorted(result.target.items(), key=lambda kv: -abs(kv[1])):
         print(f"  target {t:6} {w:+.1%}")
@@ -118,6 +130,7 @@ def _run(args, settings, path, ledger) -> int:
 def _status(args, settings, path, ledger) -> int:
     account = AlpacaLiveClient().account()
     print(f"live account {account.status} · equity ${account.equity:,.2f} · cash ${account.cash:,.2f}")
+    print(f"crypto half {settings.crypto_share:.0%} ({', '.join(f'{t} {w:.0%}' for t, w in settings.crypto_core.items())})")
     print(f"core {settings.core_ticker} · agent share {settings.agent_share:.0%} · shorts "
           f"{'on' if settings.shorts_enabled else 'off'} · confirm_live {settings.confirm_live}")
     print(f"kill switch {'ON' if KILL_PATH.exists() else 'off'} · satellite halted: {ledger.satellite_halted()}"

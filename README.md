@@ -124,6 +124,14 @@ the share of the account the agents have earned:
   (`aihf-live report` shows deposits, value, and a time-weighted return next to
   the core ETF's).
 
+**Crypto half.** Set `crypto_share: 0.5` in `~/.hedge-fund/live.yaml` to hold half
+the account as buy-and-hold 60/30/10 BTC/ETH/SOL (`crypto_core`); deposits are
+split between the halves by target, and the stock rules (satellite, its cap, its
+halt) never touch crypto. No trend rule passed its backtest (`aihf-crypto
+backtest`; see `docs/superpowers/specs/2026-10-02-crypto-sleeve-design.md` §11), so
+the crypto half is only ever topped up and rebalanced. Crypto can fall ~80%: the
+60/30/10 basket did from its 2021 peak.
+
 Setup: add `ALPACA_LIVE_KEY_ID` / `ALPACA_LIVE_SECRET_KEY` (live keys; the
 client refuses paper keys), then
 
