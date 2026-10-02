@@ -63,3 +63,21 @@ def test_cash_flows_map_and_paginate():
     flows = client.cash_flows(after="2026-09-30")
     assert len(flows) == 101 and flows[-1].kind == "DIV" and flows[-1].amount == pytest.approx(0.12)
     assert session.calls[1]["params"]["page_token"] == "a99"
+
+
+def test_crypto_positions_use_pair_names():
+    client, _ = live(FakeResponse(payload=[
+        {"symbol": "BTCUSD", "qty": "0.0011", "side": "long", "asset_class": "crypto"},
+        {"symbol": "SPY", "qty": "0.2", "side": "long", "asset_class": "us_equity"},
+    ]))
+    assert client.holdings() == {"BTC/USD": pytest.approx(0.0011), "SPY": pytest.approx(0.2)}
+
+
+def test_crypto_orders_are_good_til_cancelled():
+    order = {"id": "o", "client_order_id": "c", "symbol": "BTC/USD", "side": "buy", "qty": None,
+             "notional": "30.00", "filled_qty": "0", "filled_avg_price": None, "status": "accepted"}
+    client, session = live(FakeResponse(payload=order), FakeResponse(payload={**order, "symbol": "SPY"}))
+    client.buy_notional("BTC/USD", 30.0, "c")
+    client.buy_notional("SPY", 30.0, "c")
+    assert session.calls[0]["json"]["time_in_force"] == "gtc"
+    assert session.calls[1]["json"]["time_in_force"] == "day"

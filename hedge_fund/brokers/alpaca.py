@@ -18,6 +18,8 @@ from typing import Any, Literal
 import requests
 from pydantic import BaseModel
 
+from hedge_fund.data.crypto_prices import pair
+
 PAPER_BASE_URL = "https://paper-api.alpaca.markets"
 LIVE_BASE_URL = "https://api.alpaca.markets"
 
@@ -203,7 +205,8 @@ class AlpacaLiveClient(_AlpacaRest):
         for row in self._request("GET", "/v2/positions"):
             qty = abs(float(row["qty"]))
             if qty > 1e-9:
-                held[row["symbol"]] = -qty if row.get("side") == "short" else qty
+                symbol = pair(row["symbol"]) if row.get("asset_class") == "crypto" else row["symbol"]
+                held[symbol] = -qty if row.get("side") == "short" else qty
         return held
 
     def list_orders(self, after: str) -> list[LiveOrder]:
@@ -237,7 +240,9 @@ class AlpacaLiveClient(_AlpacaRest):
             params["page_token"] = rows[-1]["id"]
 
     def _send(self, body: dict, client_order_id: str) -> LiveOrder:
-        body = {**body, "type": "market", "time_in_force": "day", "client_order_id": client_order_id}
+        # Alpaca rejects "day" for crypto; pairs ("BTC/USD") go good-til-cancelled.
+        tif = "gtc" if "/" in body["symbol"] else "day"
+        body = {**body, "type": "market", "time_in_force": tif, "client_order_id": client_order_id}
         try:
             return _live_order(self._request("POST", "/v2/orders", json=body))
         except AlpacaError as exc:
