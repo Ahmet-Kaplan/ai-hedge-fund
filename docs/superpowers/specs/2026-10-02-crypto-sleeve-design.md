@@ -161,3 +161,24 @@ network in tests.
 
 Leverage, derivatives, shorting crypto, staking/yield, stablecoin yield,
 coins beyond BTC/ETH/SOL, exchanges other than Alpaca, trader.dev execution.
+
+## 11. Phase 1 results (2026-10-02)
+
+`aihf-crypto backtest`: 2021-07-20 → 2026-10-01 (after the 200-day warm-up),
+60/30/10 BTC/ETH/SOL, free Alpaca daily bars, 25 bps per side, weekday
+execution, halves split at 2023-06-30.
+
+| Variant | Total | Annual | Sharpe | Sharpe H1 | Sharpe H2 | Max DD | Fees (% of start) | Passes |
+|---|---|---|---|---|---|---|---|---|
+| Core (buy & hold) | +240% | +26.5% | 0.65 | 0.43 | 0.80 | 79.2% | 3.4% | — |
+| ma100 | +291% | +30.0% | 0.85 | 0.42 | 1.13 | 50.1% | 28.8% | no (H1 Sharpe 0.42 < 0.43) |
+| mom12w | +124% | +16.8% | 0.62 | 0.05 | 1.00 | 58.3% | 17.5% | no |
+| ma_cross | +185% | +22.3% | 0.70 | 0.77 | 0.71 | 45.6% | 5.5% | no (H2 Sharpe 0.71 < 0.80) |
+
+Verdict by the pre-committed bar: **no rule passes**. ma100 misses by 0.01
+Sharpe in the first half; per the bar it is not adopted (the bar exists so a
+near-miss can't be argued into a pass), and its 29% fee drag shows how much
+it whipsaws. The crypto half is buy-and-hold only: Phase 2 is the live
+integration with `crypto_trend_share` fixed at 0, and the LLM overlay is not
+built (it was defined as an overlay on a passing rule). Up to two trader.dev
+candidates may still be pre-registered (§2) and tested the same way.
