@@ -39,6 +39,7 @@ or given per study (backtest).
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from datetime import date as _date
@@ -49,6 +50,7 @@ from rich.console import Console
 
 from hedge_fund.backtesting import backtest_fund
 from hedge_fund.data import CachedDataClient, FDClient
+from hedge_fund.data.congress import CHAMBERS, CongressClient, CongressDataError
 from hedge_fund.data.sessions import completed_through
 from hedge_fund.fund import Fund, load_spec, normalize_universe
 from hedge_fund.paper import (
@@ -64,6 +66,8 @@ from hedge_fund.paper import (
 )
 from hedge_fund.paths import ensure_mandates_dir, PAPER_DIR, RESEARCH_DIR
 from hedge_fund.pipeline import FundHalted, SessionRecord
+from hedge_fund.signals.congress import DEFAULT_PAGES, slug
+from hedge_fund.signals.roster import ROSTER_PATH, load_roster
 from hedge_fund.tui.keys import apply_credentials
 from hedge_fund.tui.shared import _BACKTEST_WEEKS
 
@@ -89,8 +93,13 @@ def main() -> None:
     try:
         if args.command == "backtest":
             _backtest(args, parser, console)
+        elif args.command == "congress":
+            _congress(args, console)
         else:
             _paper(args, parser, console)
+    except CongressDataError as exc:
+        console.print(f"[red]{exc}[/]")
+        sys.exit(1)
     except (FundHalted, NothingDue, LedgerError) as exc:
         console.print(f"[red]{exc}[/]")
         sys.exit(1)
@@ -152,6 +161,23 @@ def _parser() -> argparse.ArgumentParser:
 
     resume = actions.add_parser("resume", help="clear the kill switch")
     resume.add_argument("name")
+
+    congress = commands.add_parser(
+        "congress", help="manage the congressional analysts",
+        description="Rebuild the roster of members registered as analysts. "
+        "The roster is version-controlled rather than fetched per run, so "
+        "that an analyst cannot appear or vanish between two backtests and "
+        "quietly make their track records incomparable.",
+    )
+    congress_actions = congress.add_subparsers(dest="action", required=True)
+    roster = congress_actions.add_parser(
+        "roster", help="rewrite roster.json from the most active filers",
+    )
+    roster.add_argument("--top", type=int, default=50,
+                        help="how many members to register (default: 50)")
+    roster.add_argument("--pages", type=int, default=DEFAULT_PAGES,
+                        help=f"pages of filings to rank over (default: {DEFAULT_PAGES})")
+    congress_actions.add_parser("list", help="members currently registered")
     return parser
 
 
@@ -318,6 +344,49 @@ def _tick_summary(name: str, record: SessionRecord) -> str:
     if record.executed is None and record.decision is None:
         parts.append("marked the book; no rebalance due")
     return "  ·  ".join(parts)
+
+
+def _congress(args, console: Console) -> None:
+    if args.action == "list":
+        members = load_roster()
+        if not members:
+            console.print(
+                "No congressional analysts registered. "
+                "Run [bold]aihf congress roster --top 50[/] to build the roster."
+            )
+            return
+        for member, chamber in members:
+            console.print(f"{slug(member)}  [dim]{member} · {chamber}[/]")
+        return
+
+    # Rank by how often a member files, not by how well they have done.
+    # Ranking the roster on returns would select the winners before the
+    # attribution page has measured anyone, and every subsequent track
+    # record would be of a group already chosen for having won.
+    counts: dict[tuple[str, str], int] = {}
+    with CongressClient() as client:
+        for chamber in CHAMBERS:
+            console.print(f"[dim]reading {chamber} disclosures…[/]")
+            for filing in client.latest(chamber, pages=args.pages):
+                if filing.direction != 0:
+                    counts[(filing.member, chamber)] = counts.get((filing.member, chamber), 0) + 1
+
+    if not counts:
+        console.print("[red]No disclosures returned; the roster was left unchanged.[/]")
+        sys.exit(1)
+
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0][0]))[: args.top]
+    ROSTER_PATH.write_text(json.dumps(
+        [{"member": member, "chamber": chamber, "filings": n}
+         for (member, chamber), n in ranked],
+        indent=2,
+    ) + "\n")
+
+    console.print(
+        f"Wrote {len(ranked)} members to {ROSTER_PATH}. "
+        "Commit it: the roster is part of the experiment, and changing it "
+        "silently makes earlier track records incomparable."
+    )
 
 
 if __name__ == "__main__":

@@ -6,12 +6,14 @@ from typing import cast
 
 from hedge_fund.signals.base import AlphaModel, InvestmentApproach, QuantModel
 from hedge_fund.signals.buffett import BuffettAgent
+from hedge_fund.signals.congress import CongressModel
 from hedge_fund.signals.druckenmiller import DruckenmillerAgent
 from hedge_fund.signals.graham import GrahamAgent
 from hedge_fund.signals.llm_agent import LLMAgent
 from hedge_fund.signals.lynch import LynchAgent
 from hedge_fund.signals.munger import MungerAgent
 from hedge_fund.signals.pead import PEADModel
+from hedge_fund.signals.roster import registry_entries
 
 ALPHA_MODEL_REGISTRY: dict[str, type[AlphaModel]] = {
     # Quant models
@@ -23,6 +25,12 @@ ALPHA_MODEL_REGISTRY: dict[str, type[AlphaModel]] = {
     "lynch": LynchAgent,
     "druckenmiller": DruckenmillerAgent,
 }
+
+# One analyst per member on the congressional roster, read from a file in
+# this package rather than from the vendor — see roster.py for why the set
+# of analysts is version-controlled rather than fetched. An empty roster
+# registers nothing, which is the state until `aihf congress roster` runs.
+ALPHA_MODEL_REGISTRY.update(registry_entries())
 
 
 def get_investment_approach(name: str) -> InvestmentApproach:
@@ -50,6 +58,7 @@ __all__ = [
     "LynchAgent",
     "DruckenmillerAgent",
     "PEADModel",
+    "CongressModel",
     "ALPHA_MODEL_REGISTRY",
     "get_investment_approach",
 ]

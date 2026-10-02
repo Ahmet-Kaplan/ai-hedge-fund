@@ -114,6 +114,10 @@ var storageName = toLower('${appName}st${substring(suffix, 0, 10)}')
 var vaultName = '${appName}-kv-${substring(suffix, 0, 8)}'
 var shareName = 'hedge-fund'
 var secretName = 'financial-datasets-api-key'
+// Congressional disclosures come from a second vendor, so a second secret.
+// Separate rather than shared: either key can be rotated without disturbing
+// the other, and a leak of one does not cost both feeds.
+var congressSecretName = 'fmp-api-key'
 var entraSecretName = 'entra-client-secret'
 
 // Built-in role definition ids.
@@ -199,6 +203,14 @@ param seedSecrets bool = false
 resource dataKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (seedSecrets) {
   parent: vault
   name: secretName
+  properties: {
+    value: 'placeholder-set-me-out-of-band'
+  }
+}
+
+resource congressKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (seedSecrets) {
+  parent: vault
+  name: congressSecretName
   properties: {
     value: 'placeholder-set-me-out-of-band'
   }
@@ -312,6 +324,11 @@ resource job 'Microsoft.App/jobs@2024-03-01' = {
           keyVaultUrl: '${vault.properties.vaultUri}secrets/${secretName}'
           identity: uami.id
         }
+        {
+          name: congressSecretName
+          keyVaultUrl: '${vault.properties.vaultUri}secrets/${congressSecretName}'
+          identity: uami.id
+        }
       ]
     }
     template: {
@@ -328,6 +345,10 @@ resource job 'Microsoft.App/jobs@2024-03-01' = {
             {
               name: 'FINANCIAL_DATASETS_API_KEY'
               secretRef: secretName
+            }
+            {
+              name: 'FMP_API_KEY'
+              secretRef: congressSecretName
             }
             {
               name: 'AZURE_OPENAI_ENDPOINT'
@@ -438,6 +459,10 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = if (enableDashboard) {
             {
               name: 'FINANCIAL_DATASETS_API_KEY'
               secretRef: secretName
+            }
+            {
+              name: 'FMP_API_KEY'
+              secretRef: congressSecretName
             }
             {
               name: 'AZURE_OPENAI_ENDPOINT'
@@ -564,6 +589,9 @@ output dashboardAccess string = !enableDashboard
 
 @description('Run this to install the real data key; it must not live in the template.')
 output setSecretCommand string = 'az keyvault secret set --vault-name ${vault.name} --name ${secretName} --value <your-financial-datasets-key>'
+
+@description('Run this to install the congressional-disclosures key; it must not live in the template.')
+output setCongressSecretCommand string = 'az keyvault secret set --vault-name ${vault.name} --name ${congressSecretName} --value <your-fmp-key>'
 
 @description('Run this once the tenant issues an app registration, then redeploy with entraClientId set.')
 output setEntraSecretCommand string = 'az keyvault secret set --vault-name ${vault.name} --name ${entraSecretName} --value <client-secret-from-the-app-registration>'
