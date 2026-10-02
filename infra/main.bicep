@@ -145,9 +145,19 @@ resource vault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   }
 }
 
-// Created with no value on purpose: a real key must never enter this template
-// or its parameter file. Set it with `az keyvault secret set` after deploy.
-resource dataKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+// Placeholders, created once so the first deployment has something for the
+// app's secret references to resolve against. Real values are set afterwards
+// with `az keyvault secret set` and must never enter this template.
+//
+// This is false by default because a template that declares a secret's value
+// also owns it: leaving these unconditional meant every redeploy silently
+// reset the live API key back to the placeholder, which surfaces as a 401
+// from the vendor and looks exactly like a rotated key. Only set it true on
+// a deployment into an empty vault.
+@description('Create placeholder secrets. True only on the first deploy; true later overwrites live keys.')
+param seedSecrets bool = false
+
+resource dataKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (seedSecrets) {
   parent: vault
   name: secretName
   properties: {
@@ -155,10 +165,10 @@ resource dataKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   }
 }
 
-// Same reasoning as the data key: created empty, filled out-of-band. This one
+// Same reasoning and the same seedSecrets guard as the data key. This one
 // holds the Entra app registration's client secret, which the platform's
 // built-in auth exchanges during sign-in.
-resource entraSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource entraSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (seedSecrets) {
   parent: vault
   name: entraSecretName
   properties: {
@@ -403,7 +413,12 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = if (enableDashboard) {
               value: uami.properties.clientId
             }
             {
-              name: 'AIHF_MODEL'
+              // The seam make_llm() reads when no model is passed explicitly,
+              // and what the CLI's --model writes to. The job passes --model
+              // instead; the dashboard has no argv, so it sets this directly.
+              // Without it the agents fall back to Anthropic and fail on a
+              // missing key.
+              name: 'HEDGE_FUND_LLM_MODEL'
               value: llmModel
             }
             {
