@@ -65,15 +65,22 @@ param dashboardReplicas int = 1
 // that layer does not exist while entraClientId is empty. An address
 // allow-list is the control that stands in for it. Once sign-in is live this
 // can be emptied to open the dashboard up to the tenant.
-@description('CIDRs allowed to reach the dashboard. Empty is allow-all once entraClientId is set, and deny-all before that.')
-param dashboardAllowedCidrs array = []
+// Comma-separated rather than an array so it can come from an azd env var:
+// the addresses are deployment configuration, not source, and a home or
+// office range committed to git cannot be taken back out of the history.
+@description('Comma-separated CIDRs allowed to reach the dashboard. Empty is allow-all once entraClientId is set, and deny-all before that.')
+param dashboardAllowedCidrs string = ''
+
+// An unset variable arrives as '', which splits to [''] — filtering blanks is
+// what keeps that from deploying a rule with an empty address range.
+var allowedCidrs = filter(map(split(dashboardAllowedCidrs, ','), cidr => trim(cidr)), cidr => !empty(cidr))
 
 // Whether anything at all stands between the dashboard and the internet.
 // Sign-in is the real control; the allow-list is its stand-in. With neither,
 // every request that sets x-ms-client-principal-name is admitted as that user.
-var dashboardIsGated = !empty(entraClientId) || !empty(dashboardAllowedCidrs)
+var dashboardIsGated = !empty(entraClientId) || !empty(allowedCidrs)
 
-var requestedIpRules = [for (cidr, i) in dashboardAllowedCidrs: {
+var requestedIpRules = [for (cidr, i) in allowedCidrs: {
   name: 'allow-${i}'
   action: 'Allow'
   ipAddressRange: cidr
@@ -552,8 +559,8 @@ output dashboardUrl string = enableDashboard ? 'https://${web.?properties.?confi
 output dashboardAccess string = !enableDashboard
   ? 'not deployed'
   : (!empty(entraClientId)
-      ? (empty(dashboardAllowedCidrs) ? 'sign-in, any address' : 'sign-in, allow-listed addresses only')
-      : (empty(dashboardAllowedCidrs) ? 'locked: no sign-in and no allow-list, all addresses denied' : 'allow-listed addresses only, no sign-in'))
+      ? (empty(allowedCidrs) ? 'sign-in, any address' : 'sign-in, allow-listed addresses only')
+      : (empty(allowedCidrs) ? 'locked: no sign-in and no allow-list, all addresses denied' : 'allow-listed addresses only, no sign-in'))
 
 @description('Run this to install the real data key; it must not live in the template.')
 output setSecretCommand string = 'az keyvault secret set --vault-name ${vault.name} --name ${secretName} --value <your-financial-datasets-key>'

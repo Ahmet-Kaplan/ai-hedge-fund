@@ -10,6 +10,7 @@
     "azureOpenAiEndpoint": { "value": "${AZURE_OPENAI_ENDPOINT}" },
     "azureOpenAiAccountName": { "value": "${AZURE_OPENAI_ACCOUNT_NAME=}" },
     "enableDashboard": { "value": true },
-    "entraClientId": { "value": "${ENTRA_CLIENT_ID=}" }
+    "entraClientId": { "value": "${ENTRA_CLIENT_ID=}" },
+    "dashboardAllowedCidrs": { "value": "${DASHBOARD_ALLOWED_CIDRS=}" }
   }
 }
