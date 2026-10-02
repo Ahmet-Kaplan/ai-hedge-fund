@@ -9,6 +9,7 @@ from hedge_fund.backtesting.test_fund import FakeAnalyst, FakeDataClient, SERIES
 from hedge_fund.brokers.models import Order
 from hedge_fund.brokers.sim import SimBroker
 from hedge_fund.fund import Fund, FundSpec
+from hedge_fund.pipeline import session
 from hedge_fund.pipeline.session import (
     advance,
     BookMismatch,
@@ -114,6 +115,79 @@ def test_record_stamps_code_and_mandate_versions():
     assert record.code_version
     assert len(record.mandate_hash) == 64
     assert record.llm_model is None  # no LLM agents on this desk
+
+
+# ---------------------------------------------------------------------------
+# code_version — the ledger's answer to "which code wrote this?"
+# ---------------------------------------------------------------------------
+
+class TestCodeVersion:
+    """The package version alone cannot identify a build.
+
+    Releases are tagged rarely, so several deployments share one version
+    string. A hash-chained ledger whose records all claim the same provenance
+    cannot be audited, which is the failure these tests exist to prevent.
+    """
+
+    @pytest.fixture(autouse=True)
+    def uncached(self):
+        session.code_version.cache_clear()
+        yield
+        session.code_version.cache_clear()
+
+    @staticmethod
+    def _git(responses: dict[str, str] | None):
+        """Stand in for the git subprocess; None means git is unavailable."""
+        def run(cmd, **kwargs):
+            if responses is None:
+                raise OSError("no git here")
+            key = next((part for part in cmd if part in responses), None)
+            return Mock(stdout=responses.get(key, ""))
+        return run
+
+    def test_a_build_stamp_identifies_the_image(self, monkeypatch):
+        """The runtime image has no checkout, so the build must supply this."""
+        monkeypatch.setenv("AIHF_REVISION", "abc1234")
+        monkeypatch.setattr(session.subprocess, "run", self._git(None))
+
+        assert session.code_version().endswith("+abc1234")
+
+    def test_a_checkout_supplies_the_commit_when_nothing_was_stamped(self, monkeypatch):
+        monkeypatch.delenv("AIHF_REVISION", raising=False)
+        monkeypatch.setattr(session.subprocess, "run",
+                            self._git({"rev-parse": "def5678", "status": ""}))
+
+        assert session.code_version().endswith("+def5678")
+
+    def test_uncommitted_work_is_declared_not_hidden(self, monkeypatch):
+        """The named commit is not what ran, so the record must not imply it did."""
+        monkeypatch.delenv("AIHF_REVISION", raising=False)
+        monkeypatch.setattr(session.subprocess, "run",
+                            self._git({"rev-parse": "def5678", "status": " M hedge_fund/run.py"}))
+
+        assert session.code_version().endswith("+def5678.dirty")
+
+    def test_untracked_files_do_not_count_as_dirty(self, monkeypatch):
+        """A stray lock file would otherwise mark every local run dirty, and a
+        marker that is always on tells you nothing."""
+        monkeypatch.delenv("AIHF_REVISION", raising=False)
+        seen: list[tuple] = []
+
+        def run(cmd, **kwargs):
+            seen.append(tuple(cmd))
+            return Mock(stdout="def5678" if "rev-parse" in cmd else "")
+
+        monkeypatch.setattr(session.subprocess, "run", run)
+        session.code_version()
+
+        assert any("-uno" in cmd for cmd in seen if "status" in cmd)
+
+    def test_an_unknowable_revision_degrades_to_the_bare_version(self, monkeypatch):
+        """No stamp and no checkout is the old behaviour, not a crash."""
+        monkeypatch.delenv("AIHF_REVISION", raising=False)
+        monkeypatch.setattr(session.subprocess, "run", self._git(None))
+
+        assert "+" not in session.code_version()
 
 
 # ---------------------------------------------------------------------------

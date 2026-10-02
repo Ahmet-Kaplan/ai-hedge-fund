@@ -24,6 +24,18 @@ FROM python:3.12-slim
 
 COPY --from=build /install /usr/local
 
+# Build-time provenance for the ledger. The runtime image deliberately carries
+# no .git, so code_version() cannot recover the commit by itself; without this
+# every record written by a container is stamped with the bare package
+# version, and two records produced by different builds become
+# indistinguishable in a chain whose whole purpose is to be auditable.
+#
+# Empty by default so a forgotten --build-arg degrades to the old behaviour
+# rather than baking in a wrong commit. Pass it as:
+#   --build-arg AIHF_REVISION=$(git rev-parse --short HEAD)
+ARG AIHF_REVISION=""
+ENV AIHF_REVISION=${AIHF_REVISION}
+
 # HOME drives hedge_fund/paths.py:23 (USER_DIR = Path.home() / ".hedge-fund"),
 # which is not otherwise configurable. Pointing HOME at the mounted volume is
 # what makes the ledger survive a container restart, with no code change.

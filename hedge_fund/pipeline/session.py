@@ -223,20 +223,52 @@ def mandate_hash(spec: FundSpec) -> str:
 
 @lru_cache(maxsize=1)
 def code_version() -> str:
-    """Package version, plus the git commit when running from a checkout."""
+    """Package version, plus the revision that produced it.
+
+    The revision carries the weight here. The package version moves only on a
+    release, so a chain of records stamped with it alone cannot distinguish
+    the code that actually ran — which is the one question an audit field
+    exists to answer.
+    """
     try:
         version = _version("aihf")
     except PackageNotFoundError:
         version = "dev"
+    revision = _revision()
+    return f"{version}+{revision}" if revision else version
+
+
+def _revision() -> str:
+    """The commit this code came from, or "" if it cannot be established.
+
+    A container has no checkout to interrogate, so the build stamps the commit
+    into the image and that is authoritative there. The git fallback keeps a
+    developer's local runs equally traceable.
+    """
+    stamped = os.environ.get("AIHF_REVISION", "").strip()
+    if stamped:
+        return stamped
+
     root = Path(__file__).resolve().parents[2]
-    try:
-        sha = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, timeout=2, check=True,
-        ).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        sha = ""
-    return f"{version}+{sha}" if sha else version
+
+    def git(*args: str) -> str | None:
+        try:
+            return subprocess.run(
+                ["git", "-C", str(root), *args],
+                capture_output=True, text=True, timeout=2, check=True,
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    sha = git("rev-parse", "--short", "HEAD")
+    if not sha:
+        return ""
+    # Uncommitted edits to tracked files mean the named commit is not what
+    # ran, so say so rather than let the record claim a provenance it does not
+    # have. Untracked files are excluded: lock files and scratch work would
+    # otherwise mark every local run dirty and the marker would stop meaning
+    # anything.
+    return f"{sha}.dirty" if git("status", "--porcelain", "-uno") else sha
 
 
 def _llm_model(fund: Fund) -> str | None:
