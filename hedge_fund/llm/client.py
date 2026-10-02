@@ -27,6 +27,11 @@ import requests
 
 from hedge_fund.llm import contract
 from hedge_fund.llm.registry import (
+    AZURE_API_VERSION_VAR,
+    AZURE_DEFAULT_API_VERSION,
+    AZURE_ENDPOINT_VAR,
+    AZURE_KEY_VAR,
+    azure_deployment_for,
     env_var_for,
     is_supported,
     provider_for,
@@ -235,6 +240,13 @@ def make_llm(
     environment variable, because that is the only thing the user can act on.
     """
     model = model or os.environ.get("HEDGE_FUND_LLM_MODEL") or DEFAULT_MODEL
+
+    # Checked before the registry: an Azure deployment name is arbitrary, so it
+    # would otherwise miss the lookup and fall through to the Anthropic default.
+    deployment = azure_deployment_for(model)
+    if deployment is not None:
+        return _azure_llm(model, deployment, timeout, max_tokens, on_token)
+
     provider = provider_for(model)
     if provider is None:
         # Unlisted ids still work: a model newer than the registry should not
@@ -315,6 +327,85 @@ def _flatten(content, sep: str = "\n") -> str:
                 parts.append(block.get("text", ""))
         return sep.join(parts)
     return "" if content is None else str(content)
+
+
+def _azure_llm(
+    model: str,
+    deployment: str,
+    timeout: float,
+    max_tokens: int,
+    on_token: TokenListener,
+) -> LLMClient:
+    """An Azure OpenAI deployment behind the same ChatLLM wrapper.
+
+    Azure needs three facts the other providers do not: which resource
+    (endpoint), which deployment, and which API version. Only the deployment
+    is in the model id, so the rest come from the environment.
+
+    Credentials resolve in the order Azure itself recommends: a Microsoft Entra
+    ID token if azure-identity is installed, else an API key. Entra is
+    preferred because it issues short-lived tokens — nothing long-lived has to
+    sit in a .env file — and because a shared resource's key cannot be scoped
+    or attributed to a person.
+    """
+    from langchain_openai import AzureChatOpenAI
+
+    endpoint = os.getenv(AZURE_ENDPOINT_VAR)
+    if not endpoint:
+        raise ValueError(
+            f"{AZURE_ENDPOINT_VAR} not found. Set it to your resource URL "
+            f"(https://<resource>.openai.azure.com) to use {model}."
+        )
+
+    # max_tokens stays a constructor arg so Azure matches the other chat
+    # providers; api_version is pinned because Azure routes on it per-deployment.
+    kwargs = dict(
+        azure_deployment=deployment,
+        azure_endpoint=endpoint,
+        api_version=os.getenv(AZURE_API_VERSION_VAR) or AZURE_DEFAULT_API_VERSION,
+        timeout=timeout,
+        max_retries=1,
+        max_tokens=max_tokens,
+    )
+
+    token_provider = _entra_token_provider(endpoint)
+    if token_provider is not None:
+        chat = AzureChatOpenAI(azure_ad_token_provider=token_provider, **kwargs)
+    else:
+        api_key = os.getenv(AZURE_KEY_VAR)
+        if not api_key:
+            raise ValueError(
+                f"No Azure credential for {model}. Either install azure-identity "
+                f"and sign in (`az login`) for Microsoft Entra ID, or set "
+                f"{AZURE_KEY_VAR}."
+            )
+        chat = AzureChatOpenAI(api_key=api_key, **kwargs)
+
+    return ChatLLM(model, chat, on_token)
+
+
+def _entra_token_provider(endpoint: str):
+    """A bearer-token callable for Entra ID, or None to fall back to a key.
+
+    None covers both "azure-identity isn't installed" and "it is, but no
+    credential is available" — in either case an API key is still a valid way
+    in, so this stays quiet rather than raising.
+    """
+    if os.getenv(AZURE_KEY_VAR):
+        # An explicitly set key wins: the operator picked it deliberately, and
+        # silently preferring an ambient az-login identity would be surprising.
+        return None
+    try:
+        from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+    except ImportError:
+        return None
+    try:
+        credential = DefaultAzureCredential()
+        return get_bearer_token_provider(
+            credential, "https://cognitiveservices.azure.com/.default"
+        )
+    except Exception:  # pragma: no cover - credential discovery is environmental
+        return None
 
 
 def _require_key(provider: str) -> str:

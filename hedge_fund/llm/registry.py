@@ -32,6 +32,28 @@ PROVIDER_ENV_VARS = {
 # a greyed row than a run that dies on an id the transport rejects.
 SUPPORTED_PROVIDERS = frozenset(PROVIDER_ENV_VARS)
 
+# Azure OpenAI is addressed by *deployment*, not by a catalogue model id: the
+# same GPT model lives under whatever name the resource owner gave it, so there
+# is no fixed id to list. It is therefore selected explicitly as
+# "azure/<deployment>" and stays out of PROVIDER_ENV_VARS/SUPPORTED_PROVIDERS,
+# which both mean "has rows in api_models.json the picker can show".
+AZURE_PREFIX = "azure/"
+AZURE_KEY_VAR = "AZURE_OPENAI_API_KEY"
+AZURE_ENDPOINT_VAR = "AZURE_OPENAI_ENDPOINT"
+AZURE_API_VERSION_VAR = "AZURE_OPENAI_API_VERSION"
+AZURE_DEFAULT_API_VERSION = "2024-10-21"
+
+
+def azure_deployment_for(model_id: str) -> str | None:
+    """The deployment in an "azure/<deployment>" id, else None.
+
+    None means "not an Azure id" — callers fall through to the registry.
+    """
+    if not model_id.startswith(AZURE_PREFIX):
+        return None
+    return model_id[len(AZURE_PREFIX):] or None
+
+
 _FALLBACK = ("Opus 5.5", "claude-opus-5-5", "Anthropic")
 
 

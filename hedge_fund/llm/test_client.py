@@ -27,6 +27,7 @@ from hedge_fund.llm import (
     make_llm,
     prompt_key,
     PromptCache,
+    azure_deployment_for,
     provider_for,
     SUPPORTED_PROVIDERS,
 )
@@ -104,6 +105,79 @@ def test_provider_for_reads_the_registry():
     assert provider_for("gpt-6-sol") == "OpenAI"
     assert provider_for("gpt-6-astra") == "OpenAI"
     assert provider_for("not-a-model") is None
+
+
+@pytest.fixture
+def azure_env(monkeypatch):
+    """An Azure resource configured by key, and no ambient Entra identity."""
+    monkeypatch.delenv("HEDGE_FUND_LLM_MODEL", raising=False)
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://example.openai.azure.com")
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "test-key-not-real")
+    monkeypatch.delenv("AZURE_OPENAI_API_VERSION", raising=False)
+
+
+def test_azure_deployment_parsing():
+    """Only an azure/ id is Azure; everything else falls to the registry."""
+    assert azure_deployment_for("azure/my-gpt4o") == "my-gpt4o"
+    assert azure_deployment_for("claude-opus-5-5") is None
+    # A bare prefix names no deployment, so it is not a usable Azure id.
+    assert azure_deployment_for("azure/") is None
+
+
+def test_azure_builds_from_deployment_id(azure_env):
+    """azure/<deployment> reaches the Azure transport, not the registry."""
+    llm = make_llm("azure/my-gpt4o")
+    assert llm.model == "azure/my-gpt4o"
+    assert llm._chat.deployment_name == "my-gpt4o"
+    assert llm._chat.openai_api_version == "2024-10-21"
+
+
+def test_azure_id_does_not_fall_back_to_anthropic(azure_env, monkeypatch):
+    """The Anthropic default must not swallow an unlisted Azure id."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert make_llm("azure/my-gpt4o").model == "azure/my-gpt4o"
+
+
+def test_azure_api_version_is_overridable(azure_env, monkeypatch):
+    """Azure routes on api_version per deployment, so it must be settable."""
+    monkeypatch.setenv("AZURE_OPENAI_API_VERSION", "2025-01-01-preview")
+    assert make_llm("azure/my-gpt4o")._chat.openai_api_version == "2025-01-01-preview"
+
+
+def test_azure_missing_endpoint_names_the_variable(monkeypatch):
+    """Same contract as _require_key: name the variable the user can set."""
+    monkeypatch.delenv("HEDGE_FUND_LLM_MODEL", raising=False)
+    monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "test-key-not-real")
+    with pytest.raises(ValueError, match="AZURE_OPENAI_ENDPOINT"):
+        make_llm("azure/my-gpt4o")
+
+
+def test_azure_missing_credential_offers_both_routes(monkeypatch):
+    """With no key and no Entra identity, the error names both ways in."""
+    monkeypatch.delenv("HEDGE_FUND_LLM_MODEL", raising=False)
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://example.openai.azure.com")
+    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(client_module, "_entra_token_provider", lambda endpoint: None)
+    with pytest.raises(ValueError, match="azure-identity"):
+        make_llm("azure/my-gpt4o")
+
+
+def test_azure_prefers_explicit_key_over_ambient_entra(azure_env):
+    """A deliberately set key must win over an az-login identity lying around."""
+    assert client_module._entra_token_provider("https://example.openai.azure.com") is None
+
+
+def test_azure_uses_entra_when_no_key(monkeypatch):
+    """Entra is the preferred route: no long-lived secret in a .env file."""
+    monkeypatch.delenv("HEDGE_FUND_LLM_MODEL", raising=False)
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://example.openai.azure.com")
+    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        client_module, "_entra_token_provider", lambda endpoint: (lambda: "token")
+    )
+    llm = make_llm("azure/my-gpt4o")
+    assert llm._chat.azure_ad_token_provider is not None
 
 
 class FakeChunk:

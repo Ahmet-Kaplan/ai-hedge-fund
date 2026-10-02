@@ -13,8 +13,10 @@ from hedge_fund.llm.client import (
     make_llm,
 )
 from hedge_fund.llm.registry import (
+    AZURE_PREFIX,
     PROVIDER_ENV_VARS,
     SUPPORTED_PROVIDERS,
+    azure_deployment_for,
     env_var_for,
     is_supported,
     load_api_models,
@@ -23,6 +25,7 @@ from hedge_fund.llm.registry import (
 from hedge_fund.llm.watch import ThesisStream
 
 __all__ = [
+    "AZURE_PREFIX",
     "AnthropicLLM",
     "ChatLLM",
     "DEFAULT_MODEL",
@@ -34,6 +37,7 @@ __all__ = [
     "PromptCache",
     "SUPPORTED_PROVIDERS",
     "ThesisStream",
+    "azure_deployment_for",
     "env_var_for",
     "extract_json",
     "is_supported",

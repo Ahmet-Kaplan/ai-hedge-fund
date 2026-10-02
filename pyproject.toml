@@ -33,6 +33,12 @@ pydantic = "^2.4.2"
 scipy = "^1.11.0"
 pyyaml = "^6.0.3"
 textual = "^8.2.8"
+# Optional: Microsoft Entra ID auth for Azure OpenAI deployments. Without it
+# the Azure transport still works via AZURE_OPENAI_API_KEY.
+azure-identity = {version = "^1.19.0", optional = true}
+
+[tool.poetry.extras]
+azure = ["azure-identity"]
 
 [tool.poetry.scripts]
 aihf = "hedge_fund.run:main"
