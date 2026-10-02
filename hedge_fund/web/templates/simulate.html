@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}New simulation{% endblock %}
+{% block content %}
+
+<h2>New simulation</h2>
+
+{% if error == "unknown-mandate" %}
+<div class="notice warn">That mandate could not be found.</div>
+{% elif error == "invalid-input" %}
+<div class="notice warn">Check the universe and the date range, then try again.</div>
+{% endif %}
+
+<div class="notice">
+  A simulation replays the mandate over historical sessions, running every
+  analyst at each rebalance. Agents run blind — no ticker, industry or
+  calendar date in the prompt — so the result cannot lean on what the model
+  remembers about these companies. Expect minutes, not seconds, and real
+  inference cost per rebalance.
+</div>
+
+<form method="post" action="/simulate">
+  <label for="mandate">Mandate</label>
+  <select id="mandate" name="mandate" required>
+    {% for m in mandates %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+  </select>
+
+  <label for="universe">Universe</label>
+  <input id="universe" name="universe" value="AAPL,NVDA,MSFT"
+         placeholder="comma or space separated" required>
+
+  <div class="row">
+    <div>
+      <label for="start">Start</label>
+      <input id="start" name="start" type="date" value="{{ start }}" required>
+    </div>
+    <div>
+      <label for="end">End</label>
+      <input id="end" name="end" type="date" value="{{ end }}" required>
+    </div>
+  </div>
+
+  <button type="submit">Run simulation</button>
+  {% if busy %}
+  <p class="dim" style="margin-top:14px">
+    {{ busy }} already in flight; this one will start when that finishes.
+  </p>
+  {% endif %}
+</form>
+
+<h2>Registered analysts</h2>
+<div class="panel">
+  <p class="empty">{{ analysts | join(" · ") }}</p>
+</div>
+
+{% endblock %}

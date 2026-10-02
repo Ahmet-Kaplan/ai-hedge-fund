@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Run {{ run.id }}{% endblock %}
+{% block content %}
+
+<h2>Simulation {{ run.id }}</h2>
+
+<div class="panel" style="padding:20px">
+  <div>
+    <strong>{{ run.fund }}</strong>
+    <span class="dim">· {{ run.universe | join(", ") }}
+      · {{ run.start }} → {{ run.end }}
+      · {{ run.rebalance }} rebalance
+      · ${{ "{:,.0f}".format(run.capital) }}</span>
+  </div>
+
+  <div class="bar"><span id="bar" style="width: {{ run.percent }}%"></span></div>
+  <div class="dim">
+    <span class="pill {{ run.status }}" id="status">{{ run.status }}</span>
+    <span id="detail">
+      {% if run.sessions_total %}
+        {{ run.sessions_done }} / {{ run.sessions_total }} sessions
+        · {{ run.cycles_done }} rebalances
+      {% endif %}
+    </span>
+  </div>
+
+  {% if run.status == "failed" %}
+  <div class="notice warn" style="margin-top:16px">
+    This simulation did not complete. Reference: <code>{{ run.error }}</code>
+  </div>
+  {% endif %}
+</div>
+
+{% if result %}
+<h2>Performance</h2>
+<div class="metrics">
+  {% set m = result.metrics %}
+  <div class="metric"><div class="k">Total return</div>
+    <div class="v {{ 'good' if m.total_return_pct >= 0 else 'bad' }}">
+      {{ "{:+.1%}".format(m.total_return_pct) }}</div></div>
+  <div class="metric"><div class="k">{{ result.benchmark }}</div>
+    <div class="v dim">{{ "{:+.1%}".format(m.benchmark_return_pct) }}</div></div>
+  <div class="metric"><div class="k">Excess</div>
+    <div class="v {{ 'good' if m.excess_return_pct >= 0 else 'bad' }}">
+      {{ "{:+.1%}".format(m.excess_return_pct) }}</div></div>
+  <div class="metric"><div class="k">Sharpe</div>
+    <div class="v">{{ "{:.2f}".format(m.sharpe_ratio) }}</div></div>
+  <div class="metric"><div class="k">Max drawdown</div>
+    <div class="v bad">{{ "{:.1%}".format(m.max_drawdown_pct) }}</div></div>
+  <div class="metric"><div class="k">Rebalances</div>
+    <div class="v">{{ m.n_cycles }}</div></div>
+  <div class="metric"><div class="k">Orders</div>
+    <div class="v">{{ m.n_orders }}</div></div>
+</div>
+
+<h2>Net asset value</h2>
+<div class="panel" style="padding:0 20px 14px">
+  {{ chart | safe }}
+  <legend>
+    <span><i style="background:#5ac8fa"></i>{{ result.fund }}</span>
+    <span><i style="background:#6b7280"></i>{{ result.benchmark }}</span>
+  </legend>
+</div>
+{% endif %}
+
+{% if not run.terminal %}
+<script>
+// Poll until the run reaches a terminal state, then reload once so the
+// server renders the result. textContent only — nothing here builds markup.
+(function () {
+  var id = {{ run.id | tojson }};
+  var timer = setInterval(function () {
+    fetch("/api/runs/" + encodeURIComponent(id))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (s) {
+        if (!s) { return; }
+        document.getElementById("bar").style.width = s.percent + "%";
+        document.getElementById("status").textContent = s.status;
+        document.getElementById("status").className = "pill " + s.status;
+        document.getElementById("detail").textContent = s.sessions_total
+          ? s.sessions_done + " / " + s.sessions_total + " sessions · "
+            + s.cycles_done + " rebalances"
+          : "";
+        if (s.terminal) { clearInterval(timer); location.reload(); }
+      })
+      .catch(function () { /* transient; the next tick retries */ });
+  }, 2000);
+})();
+</script>
+{% endif %}
+
+{% endblock %}

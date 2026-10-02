@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2>Deployed funds</h2>
+<div class="notice">
+  Read-only. Ticks are advanced by the scheduled job, never from this page —
+  the ledger is a hash chain with exactly one safe writer.
+</div>
+<div class="panel">
+{% if funds %}
+  <table>
+    <tr>
+      <th>Fund</th><th>Mandate</th><th>Universe</th><th>Cadence</th>
+      <th class="num">NAV</th><th>Last session</th><th>State</th>
+    </tr>
+    {% for f in funds %}
+    <tr>
+      <td>{{ f.name }}</td>
+      {% if f.error %}
+        <td colspan="6" class="bad">{{ f.error }}</td>
+      {% else %}
+        <td class="dim">{{ f.mandate }}</td>
+        <td class="dim">{{ f.universe | join(", ") }}</td>
+        <td class="dim">{{ f.rebalance }}</td>
+        <td class="num">${{ "{:,.0f}".format(f.nav) }}</td>
+        <td class="dim">{{ f.last_session or "—" }}</td>
+        <td>
+          {% if f.halted %}<span class="pill failed">halted</span>
+          {% elif f.sessions %}<span class="pill succeeded">{{ f.sessions }} sessions</span>
+          {% else %}<span class="pill">awaiting first tick</span>{% endif %}
+        </td>
+      {% endif %}
+    </tr>
+    {% endfor %}
+  </table>
+{% else %}
+  <p class="empty">No funds deployed yet.</p>
+{% endif %}
+</div>
+
+<h2>Simulations</h2>
+{% if busy %}
+<div class="notice">{{ busy }} simulation(s) queued or running. They execute one at a time.</div>
+{% endif %}
+<div class="panel">
+{% if runs %}
+  <table>
+    <tr>
+      <th>Run</th><th>Mandate</th><th>Universe</th><th>Window</th>
+      <th class="num">Progress</th><th>Status</th><th>By</th>
+    </tr>
+    {% for r in runs %}
+    <tr>
+      <td><a href="/runs/{{ r.id }}">{{ r.id }}</a></td>
+      <td class="dim">{{ r.fund }}</td>
+      <td class="dim">{{ r.universe | join(", ") }}</td>
+      <td class="dim">{{ r.start }} → {{ r.end }}</td>
+      <td class="num">{{ r.percent }}%</td>
+      <td><span class="pill {{ r.status }}">{{ r.status }}</span></td>
+      <td class="dim">{{ r.requested_by }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+{% else %}
+  <p class="empty">No simulations yet. <a href="/simulate">Run one.</a></p>
+{% endif %}
+</div>
+
+{% endblock %}
