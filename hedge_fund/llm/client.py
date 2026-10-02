@@ -17,6 +17,7 @@ import json
 import math
 import os
 import re
+import threading
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -79,14 +80,26 @@ class ChatLLM:
     as it arrives, and complete() still returns the whole response. Watching
     is a property of the client, not of the caller — so LLMAgent.predict(),
     the prompt cache, and the parse are untouched by it.
+
+    `deadline` (seconds) is a hard wall-clock limit on the whole call. Provider
+    libraries are trusted to apply their own request timeout, but Google's
+    didn't (a stalled socket hung a run for 30+ minutes over both gRPC and
+    REST), so a call past the deadline raises TimeoutError instead of hanging
+    the fund's Monday run.
     """
 
-    def __init__(self, model: str, chat, on_token: TokenListener = None) -> None:
+    def __init__(self, model: str, chat, on_token: TokenListener = None, deadline: float | None = None) -> None:
         self.model = model
         self._chat = chat
         self._on_token = on_token
+        self._deadline = deadline
 
     def complete(self, system: str, user: str) -> str:
+        if self._deadline is None:
+            return self._complete(system, user)
+        return _within(self._deadline, lambda: self._complete(system, user))
+
+    def _complete(self, system: str, user: str) -> str:
         messages = [("system", system), ("human", user)]
         if self._on_token is None:
             return _strip_reasoning(_flatten(self._chat.invoke(messages).content))
@@ -101,6 +114,30 @@ class ChatLLM:
                 parts.append(text)
                 self._on_token(text)
         return "".join(parts)
+
+
+def _within(deadline: float, call: Callable[[], str]) -> str:
+    """Run `call`, raising TimeoutError if it hasn't returned after `deadline` seconds.
+
+    The call runs on a daemon thread: one that never returns is abandoned
+    (it can't block interpreter exit), and the caller moves on.
+    """
+    box: dict = {}
+
+    def run() -> None:
+        try:
+            box["value"] = call()
+        except BaseException as exc:  # re-raised on the caller's thread
+            box["error"] = exc
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(deadline)
+    if worker.is_alive():
+        raise TimeoutError(f"no answer from the model within {deadline:g}s")
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
 
 
 class JevLLM:
@@ -253,7 +290,7 @@ def make_llm(
         chat = ChatOpenAI(
             model=model, api_key="ollama", timeout=max(timeout, 900.0), max_retries=1,
             base_url=os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434/v1")
-        return ChatLLM(model, chat, on_token)
+        return ChatLLM(model, chat, on_token, deadline=_deadline(max(timeout, 900.0)))
 
     api_key = _require_key(provider)
 
@@ -294,7 +331,12 @@ def make_llm(
     else:  # pragma: no cover - SUPPORTED_PROVIDERS is checked above
         raise ValueError(f"Unhandled provider {provider}")
 
-    return ChatLLM(model, chat, on_token)
+    return ChatLLM(model, chat, on_token, deadline=_deadline(timeout))
+
+
+def _deadline(timeout: float) -> float:
+    """Room for one request plus its one retry, and slack for connection setup."""
+    return timeout * 2 + 30
 
 
 def AnthropicLLM(model: str | None = None, **kwargs) -> LLMClient:  # noqa: N802

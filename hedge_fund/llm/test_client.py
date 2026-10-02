@@ -644,3 +644,41 @@ def test_gemini_uses_rest_so_the_timeout_applies(keyed):
     llm = make_llm(_BY_PROVIDER["Google"], timeout=17)
     assert llm._chat.transport == "rest"
     assert llm._chat.timeout == 17
+
+
+class _HangingChat:
+    """A provider call that never returns — what a stalled Gemini socket looked like."""
+
+    def __init__(self):
+        import threading
+        self.release = threading.Event()
+
+    def invoke(self, messages):
+        self.release.wait()
+
+    def stream(self, messages):
+        self.release.wait()
+        yield from ()
+
+
+@pytest.mark.parametrize("listener", [None, lambda _: None])
+def test_a_hung_provider_call_fails_at_the_deadline(listener):
+    import time
+    chat = _HangingChat()
+    start = time.monotonic()
+    with pytest.raises(TimeoutError, match="0.2s"):
+        ChatLLM("m", chat, listener, deadline=0.2).complete("s", "u")
+    assert time.monotonic() - start < 2
+    chat.release.set()
+
+
+def test_deadline_passes_through_answers_and_errors():
+    class Boom:
+        def invoke(self, messages):
+            raise RuntimeError("provider said no")
+    with pytest.raises(RuntimeError, match="provider said no"):
+        ChatLLM("m", Boom(), deadline=5).complete("s", "u")
+
+
+def test_make_llm_sets_a_deadline(keyed):
+    assert make_llm(_BY_PROVIDER["Google"], timeout=17)._deadline == 17 * 2 + 30
