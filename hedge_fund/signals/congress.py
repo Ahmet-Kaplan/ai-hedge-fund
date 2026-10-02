@@ -48,7 +48,13 @@ LOOKBACK_DAYS = 90
 # a backtest reaching past it will find members abstaining for lack of data
 # rather than for lack of trades, which is a limit of the feed and is stated
 # here rather than hidden.
-DEFAULT_PAGES = 10
+#
+# One page because entry FMP plans serve page 0 and 402 on anything past it.
+# Asking for more does not degrade to less: the error surfaces inside
+# predict(), where it takes down the whole tick rather than one analyst. At
+# 25 filings that is a few days of disclosures, far short of the 90-day
+# window above — raise this as soon as the plan allows paging.
+DEFAULT_PAGES = 1
 
 # A filed range of $15,001-$50,000 is most of what Congress discloses, so
 # size is a mild tilt and never the whole signal. An unparseable amount

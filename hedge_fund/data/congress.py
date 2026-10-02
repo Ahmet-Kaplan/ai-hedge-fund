@@ -112,7 +112,9 @@ class CongressClient:
     """
 
     BASE_URL = "https://financialmodelingprep.com/stable"
-    PAGE_SIZE = 100
+    # The largest page every FMP tier accepts. Entry plans 402 above this, and
+    # a larger plan costs only extra requests at this size, never correctness.
+    PAGE_SIZE = 25
     _RETRY_DELAYS = (5, 15, 30)
 
     def __init__(self, api_key: str | None = None, timeout: float = 30.0) -> None:
