@@ -136,7 +136,7 @@ def submit_live(
     orders = size_orders(holdings, cash, marks, target, rebalance=rebalance,
                          min_order_usd=settings.min_order_usd, min_trade_pct=settings.min_trade_pct,
                          cash_buffer_pct=settings.cash_buffer_pct)
-    check_orders(orders, holdings, cash, marks, core, shorts_ok=shorts_ok, max_name=settings.satellite_max_name_pct)
+    check_orders(orders, holdings, cash, marks, {core}, shorts_ok=shorts_ok, max_name=settings.satellite_max_name_pct)
     payload = {"session": session, "rebalance": rebalance, "equity": equity, "cash": cash, "holdings": holdings,
                "marks": marks, "paper_plan": paper_session, "paper_fresh": fresh, "agent_share": share,
                "satellite": satellite, "target": target, "orders": [o.model_dump() for o in orders], "results": []}

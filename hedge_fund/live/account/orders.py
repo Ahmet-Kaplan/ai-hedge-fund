@@ -75,9 +75,12 @@ def size_orders(
 
 def check_orders(
     orders: list[PlannedOrder], holdings: dict[str, float], cash: float, marks: dict[str, float],
-    core_ticker: str, *, shorts_ok: bool, max_name: float,
+    exempt: set[str], *, shorts_ok: bool, max_name: float,
 ) -> None:
-    """Raise if these orders would overspend cash, short without permission, or oversize a name."""
+    """Raise if these orders would overspend cash, short without permission, or oversize a name.
+
+    Names in `exempt` (the stock core and the crypto core) skip the per-name cap.
+    """
     equity = cash + sum(q * marks[t] for t, q in holdings.items())
     spend = sum(o.dollars for o in orders if o.dollars) + sum(o.shares * marks[o.ticker] for o in orders if o.shares and o.side == "buy")
     if spend > cash + 1e-6:
@@ -95,5 +98,5 @@ def check_orders(
         if q < -1e-9 and not shorts_ok:
             raise ValueError(f"{t}: would short without shorts enabled (margin and ${2000:,}+ equity)")
         grows = abs(q) > abs(holdings.get(t, 0.0)) + 1e-12   # a name that drifted over the cap may be held, not added to
-        if grows and t != core_ticker and equity > 0 and abs(q * marks[t]) / equity > max_name + _TOLERANCE:
+        if grows and t not in exempt and equity > 0 and abs(q * marks[t]) / equity > max_name + _TOLERANCE:
             raise ValueError(f"{t}: would be {abs(q * marks[t]) / equity:.1%} of the account (max {max_name:.0%})")

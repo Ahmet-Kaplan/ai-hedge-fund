@@ -51,24 +51,30 @@ def test_shorts_use_whole_shares():
 
 
 def test_check_blocks_overspend_shorts_and_oversized_names():
-    check_orders([PlannedOrder(ticker="SPY", side="buy", dollars=100.0)], {}, 100.0, MARKS, "SPY",
+    check_orders([PlannedOrder(ticker="SPY", side="buy", dollars=100.0)], {}, 100.0, MARKS, {"SPY"},
                  shorts_ok=False, max_name=0.1)
     with pytest.raises(ValueError, match="cash"):
-        check_orders([PlannedOrder(ticker="SPY", side="buy", dollars=101.0)], {}, 100.0, MARKS, "SPY",
+        check_orders([PlannedOrder(ticker="SPY", side="buy", dollars=101.0)], {}, 100.0, MARKS, {"SPY"},
                      shorts_ok=False, max_name=0.1)
     with pytest.raises(ValueError, match="short"):
-        check_orders([PlannedOrder(ticker="WMT", side="sell", shares=1)], {}, 1_000.0, MARKS, "SPY",
+        check_orders([PlannedOrder(ticker="WMT", side="sell", shares=1)], {}, 1_000.0, MARKS, {"SPY"},
                      shorts_ok=False, max_name=0.5)
     with pytest.raises(ValueError, match="NVDA"):
-        check_orders([PlannedOrder(ticker="NVDA", side="buy", dollars=50.0)], {}, 100.0, MARKS, "SPY",
+        check_orders([PlannedOrder(ticker="NVDA", side="buy", dollars=50.0)], {}, 100.0, MARKS, {"SPY"},
                      shorts_ok=False, max_name=0.1)
 
 
 def test_cap_only_blocks_orders_that_grow_a_name():
     # NVDA drifted to 12% of a $1,000 account; investing a deposit in SPY must still be allowed.
     holdings = {"SPY": 1.76, "NVDA": 1.2}        # $880 + $120
-    check_orders([PlannedOrder(ticker="SPY", side="buy", dollars=50.0)], holdings, 50.0, MARKS, "SPY",
+    check_orders([PlannedOrder(ticker="SPY", side="buy", dollars=50.0)], holdings, 50.0, MARKS, {"SPY"},
                  shorts_ok=False, max_name=0.1)
     with pytest.raises(ValueError, match="NVDA"):
-        check_orders([PlannedOrder(ticker="NVDA", side="buy", dollars=5.0)], holdings, 50.0, MARKS, "SPY",
+        check_orders([PlannedOrder(ticker="NVDA", side="buy", dollars=5.0)], holdings, 50.0, MARKS, {"SPY"},
                      shorts_ok=False, max_name=0.1)
+
+
+def test_crypto_core_names_are_exempt_from_the_satellite_cap():
+    marks = {**MARKS, "BTC/USD": 60_000.0}
+    check_orders([PlannedOrder(ticker="BTC/USD", side="buy", dollars=30.0)], {}, 100.0, marks,
+                 {"SPY", "BTC/USD"}, shorts_ok=False, max_name=0.1)
