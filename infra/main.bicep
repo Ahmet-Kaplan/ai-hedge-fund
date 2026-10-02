@@ -20,8 +20,13 @@ param location string = resourceGroup().location
 @description('Paper fund to advance. Must already exist on the file share.')
 param fundName string
 
-@description('Cron for the tick, in UTC. Default 23:30 UTC Mon-Fri = 18:30 EST / 19:30 EDT, after the 16:00 ET close in both.')
-param cronExpression string = '30 23 * * 1-5'
+// Container Apps cron has no timezone field, so this is UTC and the wall-clock
+// time drifts an hour across DST: 11:00 UTC is 07:00 EDT and 06:00 EST. Both
+// are fine. The tick never reads the current clock — it works on
+// completed_through(), which excludes the current New York date — so a
+// pre-open run processes the previous close, exactly as an after-close run does.
+@description('Cron for the tick, in UTC. Default 11:00 UTC daily = 07:00 EDT / 06:00 EST, before the 09:30 ET open.')
+param cronExpression string = '0 11 * * *'
 
 // A scheduled job whose fund does not exist yet just fails nightly. Park it on
 // a manual trigger until the share is bootstrapped, then set this true.
