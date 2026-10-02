@@ -139,10 +139,12 @@ def main(argv: list[str] | None = None) -> int:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     summary = {}
     for model in [m.strip() for m in args.models.split(",") if m.strip()]:
-        client = make_llm(model, timeout=300.0, max_tokens=8192)
+        # Cloud models get the normal timeout, so a stalled request is dropped (and
+        # scored as a failure) in ~2.5 minutes; make_llm gives local models 15.
+        client = make_llm(model, timeout=60.0, max_tokens=8192)
         results = run_model(client, picked, progress=lambda i, n, r: print(
             f"  {model}: {i}/{n} {'ok' if r['candidate'] else 'FAIL'} {r['seconds']:.0f}s", flush=True)
-            if i % 10 == 0 or i == n else None)
+            if i % 10 == 0 or i == n or not r['candidate'] else None)
         summary[model] = score(results)
         (RESULTS_DIR / f"{stamp}-{model.replace(':', '_').replace('/', '_')}.json").write_text(
             json.dumps({"model": model, "reference": args.reference, "score": summary[model], "results": results}, indent=2))
