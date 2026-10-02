@@ -636,3 +636,11 @@ def test_reasoning_tags_are_stripped_from_local_model_output():
             return Reply()
 
     assert ChatLLM("qwen3:8b", Chat()).complete("s", "u").startswith('{"signal": "bullish"')
+
+
+def test_gemini_uses_rest_so_the_timeout_applies(keyed):
+    """Over gRPC, a stalled Gemini stream ignored the timeout and hung a 200-prompt
+    run indefinitely (main thread parked in grpc cq_next). REST honours it."""
+    llm = make_llm(_BY_PROVIDER["Google"], timeout=17)
+    assert llm._chat.transport == "rest"
+    assert llm._chat.timeout == 17

@@ -275,7 +275,9 @@ def make_llm(
                             max_retries=1)
     elif provider == "Google":
         from langchain_google_genai import ChatGoogleGenerativeAI
-        chat = ChatGoogleGenerativeAI(model=model, api_key=api_key,
+        # REST, not the default gRPC: a stalled gRPC stream ignored the timeout
+        # and hung the caller forever; REST applies it to every request.
+        chat = ChatGoogleGenerativeAI(model=model, api_key=api_key, transport="rest",
                                       timeout=timeout, max_retries=1)
     elif provider == "xAI":
         from langchain_xai import ChatXAI
