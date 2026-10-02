@@ -24,7 +24,7 @@ from hedge_fund.paper.deployed import list_deployed, load_deployed
 from hedge_fund.paper.ledger import Ledger, LedgerError
 from hedge_fund.paths import ensure_mandates_dir, MANDATES_DIR, PAPER_DIR
 from hedge_fund.signals import ALPHA_MODEL_REGISTRY
-from hedge_fund.web import attribution
+from hedge_fund.web import attribution, recommend
 from hedge_fund.web.auth import NotAuthenticated, principal_from_headers
 from hedge_fund.web.charts import nav_chart
 from hedge_fund.web.runs import Runs
@@ -199,6 +199,53 @@ async def analyst_detail(request: Request, analyst: str) -> HTMLResponse:
         "min_calls": attribution.MIN_CALLS_TO_RANK,
         "min_rebalances": attribution.MIN_REBALANCES_TO_RANK,
         "min_t": attribution.MIN_T_STAT,
+        "window_weeks": attribution.WINDOW_WEEKS,
+        "sources": sources,
+    })
+
+
+@app.get("/recommendations", response_class=HTMLResponse)
+async def recommendations(request: Request) -> HTMLResponse:
+    """What the deployed funds intend to do next, and who has earned a say.
+
+    Read-only, like every route here: this page reports a decision the
+    scheduled job already recorded. It does not assess, and pressing refresh
+    cannot cause a trade.
+    """
+    principal = principal_from_headers(request.headers)
+    calls, sources = _all_calls()
+    scores = {s.analyst: s for s in attribution.score(calls)}
+
+    books = []
+    for directory in list_deployed(PAPER_DIR):
+        try:
+            deployed = load_deployed(directory)
+            latest = Ledger(directory).latest()
+        except (ValueError, LedgerError) as exc:
+            log.warning("paper fund at %s is unreadable: %s", directory, exc)
+            continue
+        if latest is None:
+            continue
+        # Only the newest record can hold an unexecuted decision: one assessed
+        # at session T is executed at T+1, so anything older has already
+        # traded and printing it would be advice about the past.
+        actions = [] if latest.decision is None else recommend.actions_from_decision(
+            latest.decision, equity=latest.nav, positions=latest.positions, scores=scores,
+        )
+        books.append({
+            "name": deployed.name,
+            "as_of": latest.session,
+            "nav": latest.nav,
+            "pending": latest.decision is not None,
+            "actions": actions,
+        })
+
+    return templates.TemplateResponse(request, "recommendations.html", {
+        "principal": principal,
+        "books": books,
+        "followable": sum(1 for b in books for a in b["actions"] if a.followable),
+        "min_t": attribution.MIN_T_STAT,
+        "min_calls": attribution.MIN_CALLS_TO_RANK,
         "window_weeks": attribution.WINDOW_WEEKS,
         "sources": sources,
     })

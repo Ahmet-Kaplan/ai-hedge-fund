@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Recommendations{% endblock %}
+{% block content %}
+
+<h2>What to trade next</h2>
+
+{% if not books %}
+  <div class="notice">
+    No deployed fund has a recorded session yet. Recommendations come from a
+    live fund's pending decision, not from a simulation — deploy a mandate and
+    let the scheduled job run once.
+  </div>
+{% else %}
+
+{% if followable %}
+  <div class="notice">
+    <strong>{{ followable }} of the actions below are backed by an analyst
+    whose record stands up.</strong> They are marked <span class="pill">followable</span>.
+    Everything else is the fund's intent reported as fact, not as advice.
+  </div>
+{% else %}
+  <div class="notice warn">
+    <strong>Nothing here is a recommendation yet.</strong>
+    The fund will trade as shown — that is already decided — but no analyst
+    behind these actions has a record clearing {{ min_calls }} scored calls
+    and an edge {{ "{:.0f}".format(min_t) }} standard errors above zero, so
+    following them would be following noise. A fund acting is not the same as
+    a fund being right, and this page will not blur the two to have something
+    to say. See <a href="/analysts">the record</a> for where each analyst
+    stands.
+  </div>
+{% endif %}
+
+{% for book in books %}
+<h2>{{ book.name }}</h2>
+<div class="dim" style="margin:-8px 0 12px">
+  Assessed at the {{ book.as_of }} close · NAV ${{ "{:,.0f}".format(book.nav) }}
+  · executes at the next close
+</div>
+
+{% if not book.pending %}
+  <div class="notice">
+    {{ book.name }} has no decision waiting. Its last session was not a
+    rebalance, so the book stands as it is until the next one.
+  </div>
+{% else %}
+<div class="panel">
+  <table>
+    <thead>
+      <tr>
+        <th>Action</th><th>Ticker</th>
+        <th class="num">Shares</th><th class="num">Mark</th><th class="num">Value</th>
+        <th class="num" title="Signed shares before and after">Book</th>
+        <th class="num">Target weight</th>
+        <th>Argued by</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in book.actions %}
+      <tr>
+        <td>
+          {% if a.side == 'hold' %}<span class="dim">hold</span>
+          {% else %}<span class="{{ 'good' if a.side == 'buy' else 'bad' }}">{{ a.side }}</span>{% endif %}
+          {% if a.followable %}<span class="pill" title="At least one analyst behind this clears the bar">followable</span>{% endif %}
+        </td>
+        <td><strong>{{ a.ticker }}</strong></td>
+        <td class="num">{% if a.shares %}{{ "{:+,}".format(a.shares) }}{% else %}<span class="dim">—</span>{% endif %}</td>
+        <td class="num">{% if a.price is not none %}${{ "{:,.2f}".format(a.price) }}
+          {% else %}<span class="dim" title="No mark; the name could not be sized">—</span>{% endif %}</td>
+        <td class="num">{% if a.dollars %}${{ "{:,.0f}".format(a.dollars) }}
+          {% else %}<span class="dim">—</span>{% endif %}</td>
+        <td class="num dim">{{ "{:,}".format(a.held) }} → {{ "{:,}".format(a.target) }}</td>
+        <td class="num">{{ "{:.1%}".format(a.target_weight) }}</td>
+        <td>
+          {% for b in a.backers %}
+            <a href="/analysts/{{ b.analyst }}">{{ b.analyst }}</a><span
+              class="{{ 'good' if b.conviction >= 0 else 'bad' }}">{{ "{:+.2f}".format(b.conviction) }}</span
+            >{% if b.proven %}<span class="pill" title="Record clears the bar">proven</span>{% endif %}{% if not loop.last %} · {% endif %}
+          {% else %}
+            <span class="dim" title="Every analyst abstained or had no view">—</span>
+          {% endfor %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if not book.actions %}<div class="empty">The decision names nothing to trade.</div>{% endif %}
+</div>
+{% endif %}
+{% endfor %}
+
+<h2>How to read this</h2>
+<div class="notice">
+  <p style="margin:0 0 10px">These are the trades a deployed fund has already
+  decided on, sized from the marks at the assessing close. The fund executes
+  at the <em>next</em> close against prices nobody has yet, so share counts
+  are its intent rather than a forecast of the fill. Share counts truncate
+  exactly as execution does — a target under one share is not a trade, which
+  is why some rows read <strong>hold</strong> despite a nonzero weight.</p>
+
+  <p style="margin:0 0 10px"><strong>Followable</strong> is a claim about the
+  analyst, not the trade. It means at least one analyst arguing for that name
+  has a measured edge standing {{ "{:.0f}".format(min_t) }} standard errors
+  clear of zero over at least {{ min_calls }} calls in the last
+  {{ window_weeks }} weeks. It does not mean the trade will work; it means
+  the opinion behind it came from someone whose opinions have been worth
+  something so far.</p>
+
+  <p style="margin:0">An unmarked row is not a warning — it is the absence of
+  evidence either way, which is the normal state for a young fund. Built from
+  {{ sources }} stored result{{ "" if sources == 1 else "s" }} for the
+  records, and the live ledgers for the book.</p>
+</div>
+{% endif %}
+
+{% endblock %}

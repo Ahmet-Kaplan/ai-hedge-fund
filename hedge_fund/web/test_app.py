@@ -41,7 +41,8 @@ def test_healthz_needs_no_principal(client: TestClient, monkeypatch) -> None:
     assert client.get("/healthz").status_code == 200
 
 
-@pytest.mark.parametrize("path", ["/", "/simulate", "/analysts", "/analysts/graham", "/api/runs/anything"])
+@pytest.mark.parametrize("path", ["/", "/simulate", "/analysts", "/analysts/graham",
+                                  "/recommendations", "/api/runs/anything"])
 def test_pages_refuse_an_unauthenticated_request(client: TestClient, monkeypatch, path: str) -> None:
     monkeypatch.setattr(auth, "REQUIRE_AUTH", True)
     assert client.get(path).status_code == 403
@@ -168,6 +169,20 @@ def test_a_registered_analyst_renders_without_any_calls(client: TestClient, sign
     response = client.get("/analysts/graham", headers=signed_in)
     assert response.status_code == 200
     assert "made no calls" in response.text
+
+
+def test_recommendations_claim_nothing_without_a_proven_analyst(
+    client: TestClient, signed_in: dict
+) -> None:
+    """The default state of this page is a refusal, and must stay one.
+
+    With no deployed fund or no qualifying record it has to say so plainly
+    rather than fall back on printing convictions as advice.
+    """
+    response = client.get("/recommendations", headers=signed_in)
+    assert response.status_code == 200
+    assert "Nothing here is a recommendation yet." in response.text or \
+           "No deployed fund has a recorded session yet." in response.text
 
 
 def test_an_unreadable_result_file_does_not_break_the_page(
