@@ -13,12 +13,17 @@
   <div class="panel" style="padding:20px">
     <div style="font-size:19px"><strong>{{ best.analyst }}</strong></div>
     <div class="dim" style="margin-top:6px">
-      Best average edge over {{ best.scored }} scored calls:
-      <span class="good">{{ "{:+.2%}".format(best.avg_edge) }}</span> per call
+      <span class="good">{{ "{:+.2%}".format(best.avg_edge) }}</span> average edge per call
+      over {{ best.scored }} calls across {{ best.rebalances }} rebalances
       {% if best.hit_rate is not none %}
         · {{ "{:.0%}".format(best.hit_rate) }} directionally right
       {% endif %}
-      · {{ best.tickers | length }} name{{ "" if best.tickers | length == 1 else "s" }}
+    </div>
+    <div class="dim" style="margin-top:6px">
+      That edge sits
+      <strong>{% if best.t_stat > 99 %}far more than 99{% else %}{{ "{:.1f}".format(best.t_stat) }}{% endif %}</strong>
+      standard errors above zero, so it is unlikely to be luck — which is
+      the only reason this name is shown at all.
     </div>
     <div class="dim" style="margin-top:10px">
       <a href="/analysts/{{ best.analyst }}">See every call →</a>
@@ -27,9 +32,14 @@
 {% else %}
   <div class="notice warn">
     <strong>No analyst has earned a recommendation yet.</strong>
-    Ranking needs at least {{ min_calls }} scored calls with a positive
-    average edge. Below that the leaderboard is sampling noise, and naming a
-    winner would be inventing confidence that the data does not support.
+    A positive average edge is not evidence of skill — about half of any
+    group of analysts who did nothing but guess will show one. To be named
+    here a record needs at least {{ min_calls }} scored calls spread over
+    {{ min_rebalances }} rebalances, and an average edge standing at least
+    {{ "{:.0f}".format(min_t) }} standard errors clear of zero.
+    The bar is set above the usual two because this page reports the best of
+    several analysts, and the best of several clears a lenient bar by chance
+    far more often than the arithmetic suggests.
     The table still shows everything measured so far.
   </div>
 {% endif %}
@@ -43,6 +53,7 @@
         <th>Analyst</th><th>Pod</th>
         <th class="num">Calls</th><th class="num">Abstained</th>
         <th class="num">Hit rate</th><th class="num">Avg edge</th>
+        <th class="num" title="Standard errors between the average edge and zero, clustered by rebalance date">Signal</th>
         <th class="num">Attributed P&amp;L</th><th class="num">Names</th>
       </tr>
     </thead>
@@ -63,6 +74,15 @@
           {% if s.avg_edge is not none %}
             <span class="{{ 'good' if s.avg_edge >= 0 else 'bad' }}">{{ "{:+.2%}".format(s.avg_edge) }}</span>
           {% else %}<span class="dim">—</span>{% endif %}
+        </td>
+        <td class="num">
+          {% if s.t_stat is none %}<span class="dim" title="Too few rebalances to measure">—</span>
+          {% elif s.t_stat > 99 %}<span class="good">&gt;99</span>
+          {% else %}
+            <span class="{{ 'good' if s.t_stat >= min_t else 'dim' }}"
+                  title="{{ 'Clear of the noise' if s.t_stat >= min_t else 'Not distinguishable from luck' }}">
+              {{ "{:.1f}".format(s.t_stat) }}</span>
+          {% endif %}
         </td>
         <td class="num {{ 'good' if s.pnl >= 0 else 'bad' }}">{{ "{:+,.0f}".format(s.pnl) }}</td>
         <td class="num dim">{{ s.tickers | length }}</td>
@@ -88,6 +108,15 @@
   P&amp;L</strong> is their signed share of what the fund actually held in
   that name, times the same move — the opinion's consequence. The two differ
   whenever an analyst was outvoted by their pod.</p>
+
+  <p style="margin:0 0 10px"><strong>Signal</strong> is how many standard
+  errors the average edge sits above zero. Calls made at the same rebalance
+  are averaged together first, because three names bought on the same day
+  move with the market and are closer to one observation than three — a
+  mandate holding more names would otherwise look more certain purely for
+  being wider. Below {{ "{:.0f}".format(min_t) }} the record is not
+  distinguishable from an analyst who guessed, whatever the average edge
+  says.</p>
 
   <p style="margin:0 0 10px"><strong>Abstentions are not neutrality.</strong>
   An analyst abstains when the data they need is missing, and abstentions are

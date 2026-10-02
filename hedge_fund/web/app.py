@@ -158,6 +158,8 @@ async def analysts(request: Request) -> HTMLResponse:
         "scores": scores,
         "best": attribution.best(scores),
         "min_calls": attribution.MIN_CALLS_TO_RANK,
+        "min_rebalances": attribution.MIN_REBALANCES_TO_RANK,
+        "min_t": attribution.MIN_T_STAT,
         "sources": sources,
         "roster": sorted(ALPHA_MODEL_REGISTRY),
     })
@@ -179,6 +181,8 @@ async def analyst_detail(request: Request, analyst: str) -> HTMLResponse:
         "score": scores[0] if scores else None,
         "calls": sorted(mine, key=lambda c: (c.date, c.ticker), reverse=True),
         "min_calls": attribution.MIN_CALLS_TO_RANK,
+        "min_rebalances": attribution.MIN_REBALANCES_TO_RANK,
+        "min_t": attribution.MIN_T_STAT,
         "sources": sources,
     })
 

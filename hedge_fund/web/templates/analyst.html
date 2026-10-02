@@ -21,15 +21,29 @@
   <div class="metric"><div class="k">Avg edge</div>
     <div class="v {{ 'good' if score.avg_edge and score.avg_edge >= 0 else 'bad' }}">
       {% if score.avg_edge is not none %}{{ "{:+.2%}".format(score.avg_edge) }}{% else %}—{% endif %}</div></div>
+  <div class="metric"><div class="k">Signal</div>
+    <div class="v {{ 'good' if score.t_stat is not none and score.t_stat >= min_t else 'dim' }}"
+         title="Standard errors between the average edge and zero, clustered by rebalance date">
+      {% if score.t_stat is none %}—
+      {% elif score.t_stat > 99 %}&gt;99
+      {% else %}{{ "{:.1f}".format(score.t_stat) }}{% endif %}</div></div>
   <div class="metric"><div class="k">Attributed P&amp;L</div>
     <div class="v {{ 'good' if score.pnl >= 0 else 'bad' }}">{{ "{:+,.0f}".format(score.pnl) }}</div></div>
 </div>
 
 {% if not score.rankable %}
 <div class="notice warn" style="margin-top:18px">
-  Only {{ score.scored }} scored call{{ "" if score.scored == 1 else "s" }} —
-  below the {{ min_calls }} needed to rank. Treat the averages above as
-  anecdote, not track record.
+  {{ score.scored }} scored call{{ "" if score.scored == 1 else "s" }} over
+  {{ score.rebalances }} rebalance{{ "" if score.rebalances == 1 else "s" }} —
+  below the {{ min_calls }} calls and {{ min_rebalances }} rebalances needed to
+  rank. Treat the averages above as anecdote, not track record.
+</div>
+{% elif score.t_stat is none or score.t_stat < min_t %}
+<div class="notice warn" style="margin-top:18px">
+  This record is long enough to rank but not strong enough to follow: the
+  average edge is within {{ "{:.0f}".format(min_t) }} standard errors of
+  zero, which is what a run of luck looks like. A positive average alone is
+  not evidence of skill.
 </div>
 {% endif %}
 
@@ -40,6 +54,9 @@
       <tr>
         <th>Date</th><th>Ticker</th><th>Pod</th>
         <th class="num">Conviction</th><th class="num">Share of pod</th>
+        <th class="num" title="Close the view was formed against">Price</th>
+        <th class="num" title="Close at the next rebalance">Next</th>
+        <th title="The fund's order in this name, filled at the following close">Fund traded</th>
         <th class="num">Position</th><th class="num">Move</th><th class="num">Edge</th>
       </tr>
     </thead>
@@ -54,6 +71,16 @@
           {% else %}{{ "{:+.2f}".format(c.conviction) }}{% endif %}
         </td>
         <td class="num dim">{% if c.abstained %}—{% else %}{{ "{:.0%}".format(c.share) }}{% endif %}</td>
+        <td class="num">{% if c.price is not none %}${{ "{:,.2f}".format(c.price) }}
+          {% else %}<span class="dim">—</span>{% endif %}</td>
+        <td class="num dim">{% if c.exit_price is not none %}${{ "{:,.2f}".format(c.exit_price) }}
+          {% else %}—{% endif %}</td>
+        <td>
+          {% if c.fill %}
+            <span class="{{ 'good' if c.fill.side == 'buy' else 'bad' }}">{{ c.fill.side }}</span>
+            {{ "{:,}".format(c.fill.quantity) }} @ ${{ "{:,.2f}".format(c.fill.price) }}
+          {% else %}<span class="dim" title="No order in this name at this rebalance">—</span>{% endif %}
+        </td>
         <td class="num">{% if c.abstained or not c.dollars %}<span class="dim">—</span>
           {% else %}${{ "{:,.0f}".format(c.dollars) }}{% endif %}</td>
         <td class="num">
@@ -68,7 +95,7 @@
         </td>
       </tr>
       {% if c.reasoning %}
-      <tr><td colspan="8" class="dim" style="padding-top:0;font-size:13px">{{ c.reasoning }}</td></tr>
+      <tr><td colspan="11" class="dim" style="padding-top:0;font-size:13px">{{ c.reasoning }}</td></tr>
       {% endif %}
       {% endfor %}
     </tbody>
@@ -81,6 +108,11 @@
   held in that name, not an order they placed. Analysts vote; the pod's
   blended conviction sizes the trade. A negative share means they argued
   against a position the fund took anyway.
+  <strong>Fund traded</strong> is likewise the pod's order, shown on every
+  row that fed into it — it is the consequence of this view, not this
+  view's own trade, and it fills one session after <strong>Price</strong>.
+  A dash there means the fund held its position rather than that the
+  analyst said nothing.
   Built from {{ sources }} stored result{{ "" if sources == 1 else "s" }}.
 </div>
 {% endif %}

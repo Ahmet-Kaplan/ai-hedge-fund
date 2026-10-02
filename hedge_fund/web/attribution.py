@@ -26,9 +26,10 @@ apportionment, not a replay of the sizing arithmetic.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from math import isfinite
+from math import copysign, fsum, inf, isfinite, sqrt
 
 from hedge_fund.backtesting.fund import FundBacktestResult
+from hedge_fund.brokers.models import Fill
 from hedge_fund.pipeline.models import CycleRecord
 
 # An analyst who abstains on every name still appears, with zero calls. That
@@ -39,6 +40,26 @@ EPSILON = 1e-9
 # Below this many scored calls a ranking is noise. The page still shows the
 # numbers — it just refuses to crown anyone.
 MIN_CALLS_TO_RANK = 20
+
+# Calls made at the same rebalance are not independent evidence: the names
+# move together with the market that day. Edges are therefore averaged
+# within a date and the statistics run across dates, so a mandate holding
+# thirty names does not look thirty times more certain than one holding one.
+MIN_REBALANCES_TO_RANK = 12
+
+# How many standard errors the mean edge must sit above zero.
+#
+# Two would be the textbook 95% bar. Three is deliberate, for two reasons
+# this page cannot escape. It reports the *maximum* over every analyst, and
+# the best of six candidates clears a nominal 95% bar by chance far more
+# often than one in twenty. And backtested edges are measured on overlapping
+# windows of correlated names, so even the clustered standard error flatters
+# the result. Harvey, Liu and Zhu argue for exactly this threshold when a
+# finding is selected from many candidates, which is what a leaderboard is.
+#
+# The cost of being wrong here is asymmetric: an unearned recommendation is
+# acted on, a withheld one merely disappoints.
+MIN_T_STAT = 3.0
 
 
 @dataclass(frozen=True)
@@ -53,12 +74,18 @@ class Call:
     conviction: float
     reasoning: str | None
     abstained: bool
+    # The close the view was formed against, and the one it is judged by.
+    price: float | None
+    exit_price: float | None
     # None at the final rebalance: nothing follows it to measure against.
     forward_return: float | None
     # Signed share of the pod's conviction that came from this analyst.
     share: float
     # That share applied to the fund's actual holding, in dollars.
     dollars: float
+    # The fund's trade in this name at this rebalance, if it made one. It
+    # belongs to the pod, not to this analyst — several views fed one order.
+    fill: Fill | None = None
 
     @property
     def edge(self) -> float | None:
@@ -92,6 +119,7 @@ class AnalystScore:
     pnl: float = 0.0
     gross_dollars: float = 0.0
     tickers: set[str] = field(default_factory=set)
+    edges_by_date: dict[str, list[float]] = field(default_factory=dict)
 
     @property
     def participation(self) -> float:
@@ -109,8 +137,43 @@ class AnalystScore:
         return self.edge_total / self.scored if self.scored else None
 
     @property
+    def session_edges(self) -> list[float]:
+        """Mean edge per rebalance date — one independent-ish observation each."""
+        return [fsum(edges) / len(edges) for edges in self.edges_by_date.values()]
+
+    @property
+    def rebalances(self) -> int:
+        return len(self.edges_by_date)
+
+    @property
+    def t_stat(self) -> float | None:
+        """Standard errors between the mean edge and zero, clustered by date.
+
+        None when there is too little to measure. A record with no dispersion
+        at all is not a failure of the test — a consistently positive edge is
+        infinitely far from zero — so that case reports a signed infinity
+        rather than discarding the strongest evidence there is.
+        """
+        observations = self.session_edges
+        n = len(observations)
+        if n < MIN_REBALANCES_TO_RANK:
+            return None
+
+        mean = fsum(observations) / n
+        variance = fsum((x - mean) ** 2 for x in observations) / (n - 1)
+        if variance <= 0:
+            return None if abs(mean) < EPSILON else copysign(inf, mean)
+        return mean / sqrt(variance / n)
+
+    @property
     def rankable(self) -> bool:
-        return self.scored >= MIN_CALLS_TO_RANK
+        """Enough evidence to be placed on a leaderboard at all.
+
+        This governs the "thin" label, not the recommendation — a record can
+        be substantial enough to rank and still fall well short of being
+        worth acting on.
+        """
+        return self.scored >= MIN_CALLS_TO_RANK and self.rebalances >= MIN_REBALANCES_TO_RANK
 
 
 def calls_from_result(result: FundBacktestResult) -> list[Call]:
@@ -148,6 +211,8 @@ def calls_from_result(result: FundBacktestResult) -> list[Call]:
         # A cycle carries its own audit copy of the spec, so a mandate edited
         # mid-flight cannot retro-reweight earlier attribution.
         spec_weights = {s.name: s.model_weights for s in cycle.spec.strategies} or weights_by_strategy
+        # build_orders emits at most one order per name, so at most one fill.
+        fills = {fill.ticker: fill for fill in cycle.fills}
 
         for strategy in cycle.strategies:
             model_weights = spec_weights.get(strategy.name, {})
@@ -163,6 +228,8 @@ def calls_from_result(result: FundBacktestResult) -> list[Call]:
 
                 equity_fraction = strategy.final_contribution.get(signal.ticker, 0.0)
                 dollars = share * equity_fraction * cycle.nav
+                price = entry.get(signal.ticker)
+                exit_price = later.get(signal.ticker)
 
                 calls.append(Call(
                     fund=result.fund,
@@ -173,9 +240,12 @@ def calls_from_result(result: FundBacktestResult) -> list[Call]:
                     conviction=signal.value,
                     reasoning=signal.reasoning,
                     abstained=abstained,
-                    forward_return=_forward_return(entry, later, signal.ticker),
+                    price=price,
+                    exit_price=exit_price,
+                    forward_return=_forward_return(price, exit_price),
                     share=share,
                     dollars=dollars,
+                    fill=fills.get(signal.ticker),
                 ))
     return calls
 
@@ -225,9 +295,11 @@ def score(calls: list[Call]) -> list[AnalystScore]:
         entry.gross_dollars += abs(call.dollars)
 
         if call.forward_return is not None:
+            edge = call.conviction * call.forward_return
             entry.scored += 1
-            entry.edge_total += call.conviction * call.forward_return
+            entry.edge_total += edge
             entry.pnl += call.dollars * call.forward_return
+            entry.edges_by_date.setdefault(call.date, []).append(edge)
         if call.correct is not None:
             entry.decided += 1
             if call.correct:
@@ -243,11 +315,19 @@ def score(calls: list[Call]) -> list[AnalystScore]:
 def best(scores: list[AnalystScore]) -> AnalystScore | None:
     """The analyst worth following, or None when the evidence is too thin.
 
-    Returning None is the common case on a short backtest and is the honest
-    answer: a leaderboard topped by someone with four calls is a coin flip
-    with a name attached.
+    A positive average edge is not evidence of skill; it is the expected
+    outcome for roughly half of any group of analysts who did nothing but
+    guess. The bar is that the mean edge stands clear of its own noise —
+    see MIN_T_STAT for why the threshold is as high as it is.
+
+    Returning None is the common case and is the honest answer. A
+    leaderboard topped by a coin flip with a name attached is worse than no
+    leaderboard, because this one is read as advice.
+
+    A positive mean is implied by clearing the threshold and is not
+    re-checked.
     """
-    ranked = [s for s in scores if s.rankable and s.avg_edge is not None and s.avg_edge > 0]
+    ranked = [s for s in scores if s.rankable and s.t_stat is not None and s.t_stat >= MIN_T_STAT]
     return ranked[0] if ranked else None
 
 
@@ -311,8 +391,7 @@ def _next_marks(snapshots: dict[str, dict[str, float]], after: str) -> dict[str,
     return {}
 
 
-def _forward_return(now: dict[str, float], later: dict[str, float], ticker: str) -> float | None:
-    entry, exit_ = now.get(ticker), later.get(ticker)
+def _forward_return(entry: float | None, exit_: float | None) -> float | None:
     if entry is None or exit_ is None or entry <= 0:
         return None
     move = exit_ / entry - 1.0

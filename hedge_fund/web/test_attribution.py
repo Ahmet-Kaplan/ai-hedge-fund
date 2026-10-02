@@ -8,9 +8,13 @@ neutral view, and a short record mistaken for a track record.
 
 from __future__ import annotations
 
+from datetime import date as _date
+from datetime import timedelta
+
 import pytest
 
 from hedge_fund.backtesting.fund import FundBacktestMetrics, FundBacktestResult
+from hedge_fund.brokers.models import Fill
 from hedge_fund.fund.spec import BlendPolicy, FundSpec, ModelSpec, StrategySpec
 from hedge_fund.models import Signal
 from hedge_fund.pipeline.models import CycleRecord, DecisionRecord, StrategyRecord
@@ -395,12 +399,160 @@ def test_a_sustained_winner_is_recommended() -> None:
     assert winner.hit_rate == 1.0
 
 
+# ---- prices and trades -----------------------------------------------------
+
+def test_a_call_carries_the_prices_it_was_judged_on() -> None:
+    """The move is a ratio; without both ends it cannot be checked by hand."""
+    fund_spec = spec(("graham", 1.0))
+    only = cycle("2026-01-05", {"AAPL": 100.0}, [signal("graham", "AAPL", 1.0)],
+                 {"AAPL": 1.0}, fund_spec)
+
+    call = attribution.calls_from_result(result_of(
+        session("2026-01-05", {}, only),
+        session("2026-01-12", {}, None, assessment("2026-01-12", {"AAPL": 125.0}, fund_spec)),
+    ))[0]
+
+    assert call.price == pytest.approx(100.0)
+    assert call.exit_price == pytest.approx(125.0)
+    assert call.forward_return == pytest.approx(0.25)
+
+
+def test_the_funds_fill_is_attached_to_every_view_behind_it() -> None:
+    """One order, several analysts. Each of their rows shows the same fill.
+
+    The fill belongs to the pod, so showing it per analyst is only honest
+    while it is labelled as the consequence of the view rather than the
+    analyst's own trade — which is what the page says.
+    """
+    fund_spec = spec(("graham", 1.0), ("buffett", 1.0))
+    traded = cycle("2026-01-05", {"AAPL": 100.0},
+                   [signal("graham", "AAPL", 0.8), signal("buffett", "AAPL", 0.4)],
+                   {"AAPL": 1.0}, fund_spec)
+    traded.fills = [Fill(ticker="AAPL", side="buy", quantity=250, price=101.5)]
+
+    calls = attribution.calls_from_result(result_of(
+        session("2026-01-05", {}, traded),
+        session("2026-01-12", {}, None, assessment("2026-01-12", {"AAPL": 110.0}, fund_spec)),
+    ))
+
+    assert {c.analyst for c in calls} == {"graham", "buffett"}
+    for call in calls:
+        assert call.fill is not None
+        assert call.fill.quantity == 250
+        assert call.fill.price == pytest.approx(101.5)
+
+
+def test_a_name_with_no_order_has_no_fill() -> None:
+    """A dash must mean "no trade", never "no data"."""
+    fund_spec = spec(("graham", 1.0))
+    untraded = cycle("2026-01-05", {"AAPL": 100.0, "MSFT": 50.0},
+                     [signal("graham", "AAPL", 0.8), signal("graham", "MSFT", 0.2)],
+                     {"AAPL": 1.0}, fund_spec)
+    untraded.fills = [Fill(ticker="AAPL", side="buy", quantity=10, price=100.0)]
+
+    calls = attribution.calls_from_result(result_of(
+        session("2026-01-05", {}, untraded),
+        session("2026-01-12", {}, None,
+                assessment("2026-01-12", {"AAPL": 110.0, "MSFT": 55.0}, fund_spec)),
+    ))
+    by_ticker = {c.ticker: c for c in calls}
+
+    assert by_ticker["AAPL"].fill is not None
+    assert by_ticker["MSFT"].fill is None
+    assert by_ticker["MSFT"].price == pytest.approx(50.0)   # priced, just not traded
+
+
+# ---- the gate measures edge against its own noise --------------------------
+
+def weekly_dates(n: int) -> list[str]:
+    start = _date(2026, 1, 5)
+    return [(start + timedelta(days=7 * i)).isoformat() for i in range(n)]
+
+
+def run_of(marks: list[float], fund_spec: FundSpec, *,
+           tickers: tuple[str, ...] = ("AAPL",)) -> FundBacktestResult:
+    """A weekly backtest where every name follows the same price path.
+
+    The last session only assesses, never executes, which is what prices the
+    final call.
+    """
+    sessions = []
+    for i, (date, mark) in enumerate(zip(weekly_dates(len(marks)), marks)):
+        prices = {t: mark for t in tickers}
+        if i == len(marks) - 1:
+            sessions.append(session(date, {}, None, assessment(date, prices, fund_spec)))
+            continue
+        sessions.append(session(date, {}, cycle(
+            date, prices, [signal("graham", t, 1.0) for t in tickers],
+            {t: 1.0 / len(tickers) for t in tickers}, fund_spec,
+        )))
+    return result_of(*sessions)
+
+
+def test_a_marginal_edge_swamped_by_noise_is_not_recommended() -> None:
+    """The case that prompted this gate: a positive mean that is still noise.
+
+    A record can be long, positive on average, and completely consistent
+    with an analyst who guessed. Recommending it is the failure mode that
+    matters, because the recommendation is what gets acted on.
+    """
+    fund_spec = spec(("graham", 1.0))
+    marks = [100.0]
+    for i in range(40):
+        marks.append(marks[-1] * (1.10 if i % 2 == 0 else 0.92))
+
+    scores = attribution.score(attribution.calls_from_result(run_of(marks, fund_spec)))
+
+    assert scores[0].rankable is True       # plenty of calls over plenty of dates
+    assert scores[0].avg_edge > 0           # and positive on average
+    assert scores[0].t_stat < attribution.MIN_T_STAT
+    assert attribution.best(scores) is None
+
+
+def test_correlated_names_on_one_date_do_not_multiply_confidence() -> None:
+    """Holding five names that move together is one observation, not five.
+
+    Without clustering, a wider mandate would look more certain purely for
+    being wider — the cheapest possible way to manufacture significance.
+    """
+    fund_spec = spec(("graham", 1.0))
+    marks = [100.0]
+    for i in range(30):
+        marks.append(marks[-1] * (1.06 if i % 3 else 0.97))
+
+    one = attribution.score(attribution.calls_from_result(
+        run_of(marks, fund_spec, tickers=("AAPL",))))[0]
+    five = attribution.score(attribution.calls_from_result(
+        run_of(marks, fund_spec, tickers=("AAPL", "MSFT", "NVDA", "AMZN", "META"))))[0]
+
+    assert five.scored == 5 * one.scored
+    assert five.t_stat == pytest.approx(one.t_stat)
+
+
+def test_many_names_on_a_few_dates_cannot_rank() -> None:
+    """Ninety calls made on three days is three days of evidence."""
+    fund_spec = spec(("graham", 1.0))
+    wide = tuple(f"T{i:02d}" for i in range(30))
+
+    scores = attribution.score(attribution.calls_from_result(
+        run_of([100.0, 110.0, 121.0, 133.0], fund_spec, tickers=wide)))
+
+    assert scores[0].scored == 90
+    assert scores[0].rebalances == 3
+    assert scores[0].rankable is False
+    assert attribution.best(scores) is None
+
+
 def test_ranking_puts_a_thin_record_below_a_proven_one() -> None:
     """A newcomer with one great call outranking a long record is the exact
     failure this page exists to avoid."""
-    thin = attribution.AnalystScore(analyst="newcomer", scored=1, edge_total=0.9)
+    thin = attribution.AnalystScore(
+        analyst="newcomer", scored=1, edge_total=0.9,
+        edges_by_date={"2026-01-05": [0.9]},
+    )
     proven = attribution.AnalystScore(
         analyst="veteran", scored=attribution.MIN_CALLS_TO_RANK, edge_total=0.2,
+        edges_by_date={f"2026-01-{d + 1:02d}": [0.01] for d in range(attribution.MIN_CALLS_TO_RANK)},
     )
 
     ordered = sorted(
