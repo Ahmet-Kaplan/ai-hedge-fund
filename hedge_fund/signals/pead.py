@@ -7,6 +7,16 @@ keeps drifting in the surprise direction for days/weeks.
 This is the quant counterpart to an LLM investor agent — same AlphaModel
 interface, pure Python math. It only forms a *view* (conviction); the
 backtest harness / portfolio construction decides timing and sizing.
+
+Silence is an abstention, not a neutral view. The model speaks only when a
+fresh surprise is on file; with no announcement, or one that has aged past
+the drift window, it has said nothing about the name rather than judged it
+fairly valued. The distinction is load-bearing twice over: the blend drops
+abstentions instead of diluting the analysts who did have a view, and
+attribution counts them separately instead of scoring a call that was never
+made. A model that returned a bare 0.0 here would report a full slate of
+zero-conviction calls on every name it had no earnings data for, which
+reads as a flat opinion rather than no opinion.
 """
 
 from __future__ import annotations
@@ -26,9 +36,9 @@ class PEADModel(QuantModel):
     """Long after an EPS BEAT, short after a MISS.
 
     `predict(ticker, date)` returns ±1.0 conviction if a qualifying earnings
-    surprise was filed within `signal_window_days` of `date`, else 0.0 (no view).
-    Conviction magnitude is fixed ±1 for v0 — scaling by surprise size is a
-    future enhancement.
+    surprise was filed within `signal_window_days` of `date`, and abstains
+    otherwise. Conviction magnitude is fixed ±1 for v0 — scaling by surprise
+    size is a future enhancement.
 
     By default only 8-K rows qualify. A 10-Q/10-K filing date is the
     statutory filing, not the announcement, so treating it as a fresh
@@ -64,15 +74,25 @@ class PEADModel(QuantModel):
         # Point-in-time: only consider filings on or before `date` (no lookahead)
         past = [e for e in events if _parse_date(e["filing_date"]) <= as_of]
         if not past:
-            return self._neutral(ticker, date)
+            # Covers a name with no announcement on file, one whose only
+            # announcements are still in the future as of `date`, and one that
+            # reported in line — a MEET is no surprise, so there is no drift to
+            # lean on either way.
+            return self._abstain(ticker, date, f"no earnings surprise on file as of {date}")
 
         # Most recent qualifying event as of `date`
         event = max(past, key=lambda e: e["filing_date"])
         filed = _parse_date(event["filing_date"])
 
         # Only fire if the event is fresh (we just learned about it)
-        if (as_of - filed).days > self._signal_window_days:
-            return self._neutral(ticker, date)
+        age = (as_of - filed).days
+        if age > self._signal_window_days:
+            return self._abstain(
+                ticker, date,
+                f"last surprise ({event['surprise']} on {event['report_period']}) was filed "
+                f"{event['filing_date']}, {age} days ago; "
+                f"the drift window is {self._signal_window_days} days",
+            )
 
         surprise = event["surprise"]
         value = 1.0 if surprise == "BEAT" else -1.0
@@ -97,8 +117,16 @@ class PEADModel(QuantModel):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _neutral(self, ticker: str, date: str) -> Signal:
-        return Signal(model_name=self.name, ticker=ticker, date=date, value=0.0)
+    def _abstain(self, ticker: str, date: str, reason: str) -> Signal:
+        """No view, stated as such. Mirrors LLMAgent's abstention shape."""
+        return Signal(
+            model_name=self.name,
+            ticker=ticker,
+            date=date,
+            value=0.0,
+            reasoning=f"abstained: {reason}",
+            metadata={"abstained": True, "abstain_reason": reason},
+        )
 
     def _qualifying_events(self, ticker: str, data_client: DataClient) -> list[dict]:
         """Return BEAT/MISS events for a ticker, deduped + retrospective-filtered.
