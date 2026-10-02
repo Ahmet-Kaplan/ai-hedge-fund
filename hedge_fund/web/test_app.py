@@ -41,7 +41,7 @@ def test_healthz_needs_no_principal(client: TestClient, monkeypatch) -> None:
     assert client.get("/healthz").status_code == 200
 
 
-@pytest.mark.parametrize("path", ["/", "/simulate", "/api/runs/anything"])
+@pytest.mark.parametrize("path", ["/", "/simulate", "/analysts", "/analysts/graham", "/api/runs/anything"])
 def test_pages_refuse_an_unauthenticated_request(client: TestClient, monkeypatch, path: str) -> None:
     monkeypatch.setattr(auth, "REQUIRE_AUTH", True)
     assert client.get(path).status_code == 403
@@ -147,6 +147,38 @@ def test_a_valid_submission_normalizes_the_universe(
     _spec, universe, _start, _end, who = no_real_backtests[0]
     assert universe == ["AAPL", "NVDA", "MSFT"]
     assert who == "philip.chung@utoronto.ca"
+
+
+# ---- analysts --------------------------------------------------------------
+
+def test_analysts_page_renders_with_no_results_yet(client: TestClient, signed_in: dict) -> None:
+    """A fresh deployment has no stored runs; the page must still load."""
+    response = client.get("/analysts", headers=signed_in)
+    assert response.status_code == 200
+    assert "Nothing to score yet" in response.text
+
+
+@pytest.mark.parametrize("name", ["../../../etc/passwd", "not-an-analyst", "../runs"])
+def test_an_unknown_analyst_is_refused(client: TestClient, signed_in: dict, name: str) -> None:
+    """The path segment only ever names a registered model, never a file."""
+    assert client.get(f"/analysts/{name}", headers=signed_in).status_code == 404
+
+
+def test_a_registered_analyst_renders_without_any_calls(client: TestClient, signed_in: dict) -> None:
+    response = client.get("/analysts/graham", headers=signed_in)
+    assert response.status_code == 200
+    assert "has not been consulted" in response.text
+
+
+def test_an_unreadable_result_file_does_not_break_the_page(
+    client: TestClient, signed_in: dict, monkeypatch, tmp_path
+) -> None:
+    """One corrupt artifact must not take down attribution for the rest."""
+    broken = tmp_path / "broken.json"
+    broken.write_text("{ not json")
+    monkeypatch.setattr(runs, "result_files", lambda limit=25: [broken])
+
+    assert client.get("/analysts", headers=signed_in).status_code == 200
 
 
 # ---- the ledger stays untouched -------------------------------------------

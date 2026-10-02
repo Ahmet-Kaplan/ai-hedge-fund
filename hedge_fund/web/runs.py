@@ -147,3 +147,20 @@ class Runs:
             return None
         path = self.research_dir / run.result_file
         return path if path.is_file() else None
+
+    def result_files(self, limit: int = 25) -> list[Path]:
+        """Finished results on disk, newest first.
+
+        Read from the directory rather than from `self._runs` on purpose:
+        the registry is in-process and a restart empties it, while these
+        files are the durable record. Anything that aggregates across runs
+        must go through here or it will silently forget everything the
+        moment the container recycles.
+
+        Capped because each file holds every signal from every cycle and
+        callers parse them all; the newest are the ones anyone asks about.
+        """
+        if not self.research_dir.is_dir():
+            return []
+        files = [p for p in self.research_dir.glob("*.json") if p.is_file()]
+        return sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)[:limit]

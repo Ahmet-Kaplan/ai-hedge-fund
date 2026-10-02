@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}{{ analyst }}{% endblock %}
+{% block content %}
+
+<h2>{{ analyst }}</h2>
+
+{% if score is none %}
+  <div class="notice">
+    {{ analyst }} has not been consulted in any stored simulation. Add them to
+    a mandate's pod and <a href="/simulate">run one</a>.
+  </div>
+{% else %}
+<div class="metrics">
+  <div class="metric"><div class="k">Calls</div><div class="v">{{ score.calls }}</div></div>
+  <div class="metric"><div class="k">Abstained</div>
+    <div class="v {{ 'bad' if score.abstentions else 'dim' }}">{{ score.abstentions }}</div></div>
+  <div class="metric"><div class="k">Participation</div>
+    <div class="v">{{ "{:.0%}".format(score.participation) }}</div></div>
+  <div class="metric"><div class="k">Hit rate</div>
+    <div class="v">{% if score.hit_rate is not none %}{{ "{:.0%}".format(score.hit_rate) }}{% else %}—{% endif %}</div></div>
+  <div class="metric"><div class="k">Avg edge</div>
+    <div class="v {{ 'good' if score.avg_edge and score.avg_edge >= 0 else 'bad' }}">
+      {% if score.avg_edge is not none %}{{ "{:+.2%}".format(score.avg_edge) }}{% else %}—{% endif %}</div></div>
+  <div class="metric"><div class="k">Attributed P&amp;L</div>
+    <div class="v {{ 'good' if score.pnl >= 0 else 'bad' }}">{{ "{:+,.0f}".format(score.pnl) }}</div></div>
+</div>
+
+{% if not score.rankable %}
+<div class="notice warn" style="margin-top:18px">
+  Only {{ score.scored }} scored call{{ "" if score.scored == 1 else "s" }} —
+  below the {{ min_calls }} needed to rank. Treat the averages above as
+  anecdote, not track record.
+</div>
+{% endif %}
+
+<h2>Every call</h2>
+<div class="panel">
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th><th>Ticker</th><th>Pod</th>
+        <th class="num">Conviction</th><th class="num">Share of pod</th>
+        <th class="num">Position</th><th class="num">Move</th><th class="num">Edge</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in calls %}
+      <tr>
+        <td class="dim">{{ c.date }}</td>
+        <td><strong>{{ c.ticker }}</strong></td>
+        <td class="dim">{{ c.strategy }}</td>
+        <td class="num">
+          {% if c.abstained %}<span class="dim" title="Required data was missing">abstained</span>
+          {% else %}{{ "{:+.2f}".format(c.conviction) }}{% endif %}
+        </td>
+        <td class="num dim">{% if c.abstained %}—{% else %}{{ "{:.0%}".format(c.share) }}{% endif %}</td>
+        <td class="num">{% if c.abstained or not c.dollars %}<span class="dim">—</span>
+          {% else %}${{ "{:,.0f}".format(c.dollars) }}{% endif %}</td>
+        <td class="num">
+          {% if c.forward_return is not none %}
+            <span class="{{ 'good' if c.forward_return >= 0 else 'bad' }}">{{ "{:+.1%}".format(c.forward_return) }}</span>
+          {% else %}<span class="dim">—</span>{% endif %}
+        </td>
+        <td class="num">
+          {% if c.edge is not none %}
+            <span class="{{ 'good' if c.edge >= 0 else 'bad' }}">{{ "{:+.2%}".format(c.edge) }}</span>
+          {% else %}<span class="dim">—</span>{% endif %}
+        </td>
+      </tr>
+      {% if c.reasoning %}
+      <tr><td colspan="8" class="dim" style="padding-top:0;font-size:13px">{{ c.reasoning }}</td></tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if not calls %}<div class="empty">No calls recorded.</div>{% endif %}
+</div>
+
+<div class="notice" style="margin-top:18px">
+  <strong>Position</strong> is this analyst's signed share of what the fund
+  held in that name, not an order they placed. Analysts vote; the pod's
+  blended conviction sizes the trade. A negative share means they argued
+  against a position the fund took anyway.
+  Built from {{ sources }} stored result{{ "" if sources == 1 else "s" }}.
+</div>
+{% endif %}
+
+{% endblock %}

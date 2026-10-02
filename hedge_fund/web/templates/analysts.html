@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Analysts{% endblock %}
+{% block content %}
+
+<h2>Which analyst to follow</h2>
+
+{% if sources == 0 %}
+  <div class="notice">
+    Nothing to score yet. Analyst records are built from completed
+    simulations — <a href="/simulate">run one</a> and this page fills in.
+  </div>
+{% elif best %}
+  <div class="panel" style="padding:20px">
+    <div style="font-size:19px"><strong>{{ best.analyst }}</strong></div>
+    <div class="dim" style="margin-top:6px">
+      Best average edge over {{ best.scored }} scored calls:
+      <span class="good">{{ "{:+.2%}".format(best.avg_edge) }}</span> per call
+      {% if best.hit_rate is not none %}
+        · {{ "{:.0%}".format(best.hit_rate) }} directionally right
+      {% endif %}
+      · {{ best.tickers | length }} name{{ "" if best.tickers | length == 1 else "s" }}
+    </div>
+    <div class="dim" style="margin-top:10px">
+      <a href="/analysts/{{ best.analyst }}">See every call →</a>
+    </div>
+  </div>
+{% else %}
+  <div class="notice warn">
+    <strong>No analyst has earned a recommendation yet.</strong>
+    Ranking needs at least {{ min_calls }} scored calls with a positive
+    average edge. Below that the leaderboard is sampling noise, and naming a
+    winner would be inventing confidence that the data does not support.
+    The table still shows everything measured so far.
+  </div>
+{% endif %}
+
+{% if sources %}
+<h2>Record</h2>
+<div class="panel">
+  <table>
+    <thead>
+      <tr>
+        <th>Analyst</th><th>Pod</th>
+        <th class="num">Calls</th><th class="num">Abstained</th>
+        <th class="num">Hit rate</th><th class="num">Avg edge</th>
+        <th class="num">Attributed P&amp;L</th><th class="num">Names</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in scores %}
+      <tr>
+        <td><a href="/analysts/{{ s.analyst }}">{{ s.analyst }}</a>
+          {% if not s.rankable %}<span class="pill" title="Fewer than {{ min_calls }} scored calls">thin</span>{% endif %}
+        </td>
+        <td class="dim">{{ s.strategies | sort | join(", ") }}</td>
+        <td class="num">{{ s.calls }}</td>
+        <td class="num {{ 'dim' if not s.abstentions else 'bad' }}">{{ s.abstentions }}</td>
+        <td class="num">
+          {% if s.hit_rate is not none %}{{ "{:.0%}".format(s.hit_rate) }}
+          {% else %}<span class="dim">—</span>{% endif %}
+        </td>
+        <td class="num">
+          {% if s.avg_edge is not none %}
+            <span class="{{ 'good' if s.avg_edge >= 0 else 'bad' }}">{{ "{:+.2%}".format(s.avg_edge) }}</span>
+          {% else %}<span class="dim">—</span>{% endif %}
+        </td>
+        <td class="num {{ 'good' if s.pnl >= 0 else 'bad' }}">{{ "{:+,.0f}".format(s.pnl) }}</td>
+        <td class="num dim">{{ s.tickers | length }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% set silent = roster | reject("in", scores | map(attribute="analyst") | list) | list %}
+{% if silent %}
+<div class="notice" style="margin-top:18px">
+  Never consulted in these runs: <strong>{{ silent | join(", ") }}</strong>.
+  An analyst only appears above if a mandate put them on a pod.
+</div>
+{% endif %}
+
+<h2>How to read this</h2>
+<div class="notice">
+  <p style="margin:0 0 10px"><strong>Avg edge</strong> is conviction × the
+  name's move to the next rebalance, averaged over an analyst's calls. It
+  judges the opinion whether or not the fund acted on it. <strong>Attributed
+  P&amp;L</strong> is their signed share of what the fund actually held in
+  that name, times the same move — the opinion's consequence. The two differ
+  whenever an analyst was outvoted by their pod.</p>
+
+  <p style="margin:0 0 10px"><strong>Abstentions are not neutrality.</strong>
+  An analyst abstains when the data they need is missing, and abstentions are
+  excluded from the blend entirely. A high abstention count means that analyst
+  was absent from the decision, not that they were cautious — check the data
+  coverage for the window before reading anything into their record.</p>
+
+  <p style="margin:0">Edge measures the call, not the fill. Orders execute at
+  the next close after a decision, so realized P&amp;L differs from these
+  figures by a session of slippage. Built from {{ sources }} stored
+  result{{ "" if sources == 1 else "s" }}.</p>
+</div>
+{% endif %}
+
+{% endblock %}

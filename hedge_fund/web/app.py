@@ -24,6 +24,7 @@ from hedge_fund.paper.deployed import list_deployed, load_deployed
 from hedge_fund.paper.ledger import Ledger, LedgerError
 from hedge_fund.paths import ensure_mandates_dir, MANDATES_DIR, PAPER_DIR
 from hedge_fund.signals import ALPHA_MODEL_REGISTRY
+from hedge_fund.web import attribution
 from hedge_fund.web.auth import NotAuthenticated, principal_from_headers
 from hedge_fund.web.charts import nav_chart
 from hedge_fund.web.runs import Runs
@@ -142,6 +143,46 @@ async def run_detail(request: Request, run_id: str) -> HTMLResponse:
     })
 
 
+@app.get("/analysts", response_class=HTMLResponse)
+async def analysts(request: Request) -> HTMLResponse:
+    """Who called what, and whose calls were worth having.
+
+    Aggregated across every result file on disk, not the in-memory registry,
+    so the table survives a restart and deepens as more simulations are run.
+    """
+    principal = principal_from_headers(request.headers)
+    calls, sources = _all_calls()
+    scores = attribution.score(calls)
+    return templates.TemplateResponse(request, "analysts.html", {
+        "principal": principal,
+        "scores": scores,
+        "best": attribution.best(scores),
+        "min_calls": attribution.MIN_CALLS_TO_RANK,
+        "sources": sources,
+        "roster": sorted(ALPHA_MODEL_REGISTRY),
+    })
+
+
+@app.get("/analysts/{analyst}", response_class=HTMLResponse)
+async def analyst_detail(request: Request, analyst: str) -> HTMLResponse:
+    """One analyst's calls in full: what they said, held, and earned."""
+    principal = principal_from_headers(request.headers)
+    if analyst not in ALPHA_MODEL_REGISTRY:
+        return HTMLResponse("<h1>No such analyst</h1>", status_code=404)
+
+    calls, sources = _all_calls()
+    mine = [c for c in calls if c.analyst == analyst]
+    scores = [s for s in attribution.score(mine) if s.analyst == analyst]
+    return templates.TemplateResponse(request, "analyst.html", {
+        "principal": principal,
+        "analyst": analyst,
+        "score": scores[0] if scores else None,
+        "calls": sorted(mine, key=lambda c: (c.date, c.ticker), reverse=True),
+        "min_calls": attribution.MIN_CALLS_TO_RANK,
+        "sources": sources,
+    })
+
+
 @app.get("/api/runs/{run_id}")
 async def run_status(request: Request, run_id: str) -> JSONResponse:
     """Polled by the run page for progress. Cheap and side-effect free."""
@@ -165,6 +206,29 @@ def _validate_window(start: str, end: str) -> None:
 def _mandates() -> list[str]:
     ensure_mandates_dir()
     return sorted(p.name for p in MANDATES_DIR.glob("*.yaml"))
+
+
+def _all_calls() -> tuple[list[attribution.Call], int]:
+    """Every analyst call across the stored results, and how many files fed it.
+
+    A result file written by an older schema, or truncated by a crash mid
+    write, must not take the page down — the rest of the corpus is still
+    worth reading, so a bad file is logged and skipped.
+
+    Files arrive newest first, which is what lets the deduplication keep the
+    most recent replay of any rebalance that two overlapping windows share.
+    """
+    calls: list[attribution.Call] = []
+    sources = 0
+    for path in runs.result_files():
+        try:
+            result = FundBacktestResult.model_validate_json(path.read_text())
+        except (OSError, ValueError) as exc:
+            log.warning("skipping unreadable result %s: %s", path.name, exc)
+            continue
+        calls.extend(attribution.calls_from_result(result))
+        sources += 1
+    return attribution.deduplicate(calls), sources
 
 
 def _paper_funds() -> list[dict]:
