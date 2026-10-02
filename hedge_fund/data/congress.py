@@ -160,6 +160,16 @@ class CongressClient:
         response = self._session.get(
             url, params={**params, "apikey": self._api_key}, timeout=self._timeout,
         )
+        if response.status_code == 402:
+            # FMP bills pagination and page size as plan features, so a key
+            # that reads /profile fine still 402s here. Saying so beats
+            # sending someone to check a key that was never the problem.
+            raise CongressDataError(
+                f"GET {path} returned 402: the FMP plan does not cover this request "
+                f"(page={params.get('page')}, limit={params.get('limit')}). "
+                "Entry plans allow page 0 only, with limit at most 25.",
+                status_code=402,
+            )
         if response.status_code != 200:
             raise CongressDataError(
                 f"GET {path} returned {response.status_code}",
