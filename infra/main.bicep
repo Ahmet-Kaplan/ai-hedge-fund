@@ -65,8 +65,40 @@ param dashboardReplicas int = 1
 // that layer does not exist while entraClientId is empty. An address
 // allow-list is the control that stands in for it. Once sign-in is live this
 // can be emptied to open the dashboard up to the tenant.
-@description('CIDRs allowed to reach the dashboard. Empty allows all, which is only safe once entraClientId is set.')
+@description('CIDRs allowed to reach the dashboard. Empty is allow-all once entraClientId is set, and deny-all before that.')
 param dashboardAllowedCidrs array = []
+
+// Whether anything at all stands between the dashboard and the internet.
+// Sign-in is the real control; the allow-list is its stand-in. With neither,
+// every request that sets x-ms-client-principal-name is admitted as that user.
+var dashboardIsGated = !empty(entraClientId) || !empty(dashboardAllowedCidrs)
+
+var requestedIpRules = [for (cidr, i) in dashboardAllowedCidrs: {
+  name: 'allow-${i}'
+  action: 'Allow'
+  ipAddressRange: cidr
+  description: 'Permitted while dashboard sign-in is not yet configured'
+}]
+
+// Fail closed. An empty ipSecurityRestrictions array means "allow every
+// address", so a deploy that simply forgets dashboardAllowedCidrs while
+// sign-in is still unconfigured would publish the app with nothing in front
+// of it, silently and with no failed step to notice. A control that depends
+// on the caller remembering a command-line argument is not a control.
+//
+// A single Allow rule is an implicit deny for every other address, so
+// allow-listing one that can never be a client denies everyone. 192.0.2.1 is
+// TEST-NET-1, reserved for documentation by RFC 5737 and unroutable.
+// The dashboard then returns 403 to everybody, which is noticed in seconds
+// and harms nothing, rather than being open, which is noticed by no one.
+var denyAllIpRules = [{
+  name: 'deny-all'
+  action: 'Allow'
+  ipAddressRange: '192.0.2.1/32'
+  description: 'No entraClientId and no dashboardAllowedCidrs: refusing to publish the dashboard'
+}]
+
+var dashboardIpRules = dashboardIsGated ? requestedIpRules : denyAllIpRules
 
 var suffix = uniqueString(resourceGroup().id)
 // Storage allows no hyphens and caps at 24; Key Vault caps at 24 too. Both
@@ -348,14 +380,10 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = if (enableDashboard) {
         transport: 'auto'
         // Terminate at the edge and never offer a cleartext path inward.
         allowInsecure: false
-        // An empty array means no restriction, which is the correct shape to
-        // send once sign-in is doing the gatekeeping.
-        ipSecurityRestrictions: [for (cidr, i) in dashboardAllowedCidrs: {
-          name: 'allow-${i}'
-          action: 'Allow'
-          ipAddressRange: cidr
-          description: 'Permitted while dashboard sign-in is not yet configured'
-        }]
+        // Empty means no restriction, which is the correct shape to send once
+        // sign-in is doing the gatekeeping and the wrong one before that.
+        // See dashboardIpRules.
+        ipSecurityRestrictions: dashboardIpRules
       }
       registries: [
         {
@@ -507,6 +535,16 @@ output identityClientId string = uami.properties.clientId
 // Safe-dereference: `web` is null when the dashboard is switched off, and a
 // plain ternary still type-checks the branch it will not take.
 output dashboardUrl string = enableDashboard ? 'https://${web.?properties.?configuration.?ingress.?fqdn ?? ''}' : ''
+
+// Printed on every deploy so the access posture is stated rather than
+// inferred. 'locked' is the fail-closed case and means this deploy omitted
+// both controls; re-run with dashboardAllowedCidrs or entraClientId.
+@description('How the dashboard is reachable: by sign-in, by address, or not at all.')
+output dashboardAccess string = !enableDashboard
+  ? 'not deployed'
+  : (!empty(entraClientId)
+      ? (empty(dashboardAllowedCidrs) ? 'sign-in, any address' : 'sign-in, allow-listed addresses only')
+      : (empty(dashboardAllowedCidrs) ? 'locked: no sign-in and no allow-list, all addresses denied' : 'allow-listed addresses only, no sign-in'))
 
 @description('Run this to install the real data key; it must not live in the template.')
 output setSecretCommand string = 'az keyvault secret set --vault-name ${vault.name} --name ${secretName} --value <your-financial-datasets-key>'
