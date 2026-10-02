@@ -53,3 +53,21 @@ def test_run_and_score_against_the_reference():
     assert s["agreement"] == pytest.approx(2 / 3)        # of the valid answers
     assert s["opposite"] == pytest.approx(1 / 3)
     assert -1 <= s["value_correlation"] <= 1
+
+
+def test_run_stops_once_failures_exceed_the_allowance():
+    """Past the allowance the model can't reach the validity bar, so stop paying for answers."""
+    refs = [record(i, "a", "bullish", 80) for i in range(10)]
+    calls = []
+
+    class Broken:
+        model = "broken"
+
+        def complete(self, system, user):
+            calls.append(user)
+            raise TimeoutError("no answer")
+
+    results = run_model(Broken(), refs, max_failures=2)
+    assert len(results) == 3 and len(calls) == 3
+    assert all(r["candidate"] is None for r in results)
+    assert len(run_model(Broken(), refs)) == 10            # no allowance: run everything

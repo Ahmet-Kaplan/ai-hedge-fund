@@ -67,8 +67,13 @@ def sample(refs: list[dict], n: int, seed: int = 7) -> list[dict]:
     return picked
 
 
-def run_model(client: LLMClient, refs: list[dict], progress=None) -> list[dict]:
-    """The candidate's answer to each reference prompt, with timing and any error."""
+def run_model(client: LLMClient, refs: list[dict], progress=None, max_failures: int | None = None) -> list[dict]:
+    """The candidate's answer to each reference prompt, with timing and any error.
+
+    With max_failures, stop as soon as failures exceed it: past that point the
+    candidate can't reach the validity bar, so the remaining answers would only
+    cost money.
+    """
     from hedge_fund.signals.llm_agent import parse_view
 
     results = []
@@ -86,6 +91,8 @@ def run_model(client: LLMClient, refs: list[dict], progress=None) -> list[dict]:
                         "response_chars": chars, "prompt_chars": len(ref["system"]) + len(ref["user"])})
         if progress:
             progress(i + 1, len(refs), results[-1])
+        if max_failures is not None and sum(r["candidate"] is None for r in results) > max_failures:
+            break
     return results
 
 
@@ -127,6 +134,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reference", default="claude-opus-5-5")
     parser.add_argument("--n", type=int, default=100, help="prompts per model")
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--min-valid", type=float, default=None,
+                        help="stop a model as soon as it can no longer reach this valid-answer rate, e.g. 0.98")
     args = parser.parse_args(argv)
 
     refs = load_references(DEFAULT_CACHE_DIR, args.reference)
@@ -142,12 +151,19 @@ def main(argv: list[str] | None = None) -> int:
         # Cloud models get the normal timeout, so a stalled request is dropped (and
         # scored as a failure) in ~2.5 minutes; make_llm gives local models 15.
         client = make_llm(model, timeout=60.0, max_tokens=8192)
-        results = run_model(client, picked, progress=lambda i, n, r: print(
-            f"  {model}: {i}/{n} {'ok' if r['candidate'] else 'FAIL'} {r['seconds']:.0f}s", flush=True)
+        allowance = None if args.min_valid is None else int(len(picked) * (1 - args.min_valid) + 1e-9)
+        results = run_model(client, picked, max_failures=allowance, progress=lambda i, n, r: print(
+            f"  {model}: {i}/{n} {'ok' if r['candidate'] else 'FAIL'} {r['seconds']:.0f}s"
+            + (f"  ({r['error']})" if r["error"] else ""), flush=True)
             if i % 10 == 0 or i == n or not r['candidate'] else None)
+        stopped = len(results) < len(picked)
+        if stopped:
+            print(f"  {model}: STOPPED after {len(results)} prompts: more than {allowance} failures, "
+                  f"so it can't reach {args.min_valid:.0%} valid", flush=True)
         summary[model] = score(results)
         (RESULTS_DIR / f"{stamp}-{model.replace(':', '_').replace('/', '_')}.json").write_text(
-            json.dumps({"model": model, "reference": args.reference, "score": summary[model], "results": results}, indent=2))
+            json.dumps({"model": model, "reference": args.reference, "score": summary[model],
+                        "stopped_early": stopped, "results": results}, indent=2))
 
     print(f"\n{'model':22} {'valid':>6} {'agree':>6} {'opposite':>9} {'corr':>6} {'sec/answer':>11}")
     for model, s in summary.items():
