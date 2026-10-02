@@ -13,6 +13,7 @@ import json
 import pytest
 
 from hedge_fund.data.congress import (
+    CongressClient,
     CongressDataError,
     Disclosure,
     parse_amount,
@@ -59,6 +60,50 @@ def test_a_row_missing_a_field_raises_rather_than_being_skipped() -> None:
             "symbol": "AAPL", "transactionDate": "2026-05-01",
             "type": "Purchase", "firstName": "Jane", "lastName": "Doe",
         }, "house")
+
+
+def test_a_filing_with_no_ticker_is_skipped_not_fatal() -> None:
+    """Members disclose LLCs and real estate, not only listed equities.
+
+    A live Senate page had 23 of 25 rows carrying no symbol. Raising on
+    those made the whole chamber unreadable, which is how this was found.
+    """
+    assert parse_disclosure({
+        "symbol": "", "transactionDate": "2026-05-01",
+        "disclosureDate": "2026-06-01", "type": "Purchase",
+        "firstName": "Jane", "lastName": "Doe",
+        "assetDescription": "MH Built to Last LLC",
+    }, "senate") is None
+
+
+def test_a_dateless_equity_filing_still_raises() -> None:
+    """The symbol says this is tradeable, so a blank disclosure date is the
+    lookahead guarantee arriving empty — not a non-equity filing."""
+    with pytest.raises(CongressDataError, match="AAPL"):
+        parse_disclosure({
+            "symbol": "AAPL", "transactionDate": "2026-05-01",
+            "disclosureDate": "", "type": "Purchase",
+            "firstName": "Jane", "lastName": "Doe",
+        }, "house")
+
+
+def test_a_page_of_untradeable_filings_does_not_stop_paging() -> None:
+    """A page of nothing but LLCs is still a full page; paging must not
+    mistake it for the end of the data."""
+    rows = [{"symbol": "", "transactionDate": "2026-05-01",
+             "disclosureDate": "2026-06-01", "type": "Purchase",
+             "firstName": "Jane", "lastName": "Doe"}] * CongressClient.PAGE_SIZE
+
+    client = CongressClient(api_key="unused")
+    pages: list[int] = []
+
+    def fake_get(path, params):
+        pages.append(params["page"])
+        return rows if params["page"] == 0 else []
+
+    client._get = fake_get  # type: ignore[method-assign]
+    assert client.latest("senate", pages=3) == []
+    assert pages == [0, 1]  # it kept going rather than stopping on an empty yield
 
 
 def test_a_filed_range_is_read_into_its_bounds() -> None:

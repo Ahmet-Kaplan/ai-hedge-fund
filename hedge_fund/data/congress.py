@@ -142,7 +142,10 @@ class CongressClient:
         filings: list[Disclosure] = []
         for page in range(pages):
             rows = self._get(f"/{chamber}-latest", {"page": page, "limit": self.PAGE_SIZE})
-            filings.extend(parse_disclosure(row, chamber) for row in rows)
+            parsed = [parse_disclosure(row, chamber) for row in rows]
+            filings.extend(filing for filing in parsed if filing is not None)
+            # Page on the rows the vendor returned, not the ones that survived
+            # parsing: a page of nothing but LLCs is still a full page.
             if len(rows) < self.PAGE_SIZE:
                 break
         return filings
@@ -184,12 +187,21 @@ class CongressClient:
         return payload
 
 
-def parse_disclosure(row: dict, chamber: Chamber) -> Disclosure:
-    """Build a Disclosure from one API row, or raise if it cannot be trusted.
+def parse_disclosure(row: dict, chamber: Chamber) -> Disclosure | None:
+    """Build a Disclosure from one API row.
 
-    Raising beats skipping. A row quietly dropped for a renamed field turns
-    a vendor schema change into an analyst who abstains on everything, and
-    that reads as a quiet market rather than a broken integration.
+    Return None for a filing that is not about a listed equity, and raise
+    for a row that cannot be trusted. The two are different problems:
+
+    A *missing key* is a vendor schema change. Dropping those rows would
+    turn a broken integration into an analyst who abstains on everything,
+    which reads as a quiet market rather than a feed to go and fix — so
+    that still raises.
+
+    An *empty symbol* is ordinary. Members disclose LLCs, real estate and
+    bonds alongside equities, and 23 of 25 rows in a live Senate page
+    carry no ticker. Those filings are untradeable here, not malformed,
+    and raising on them makes the entire chamber unreadable.
     """
     try:
         ticker = str(row["symbol"]).strip().upper()
@@ -202,8 +214,13 @@ def parse_disclosure(row: dict, chamber: Chamber) -> Disclosure:
             f"disclosure row is missing {exc.args[0]!r}; the vendor schema may have changed"
         ) from exc
 
-    if not ticker or not disclosure_date:
-        raise CongressDataError("disclosure row has no symbol or no disclosure date")
+    if not ticker:
+        return None
+    if not disclosure_date:
+        # The symbol says this is an equity trade, so a blank disclosure date
+        # is not a non-equity filing — it is the one field the lookahead
+        # guarantee rests on, arriving empty. Never silently drop that.
+        raise CongressDataError(f"{ticker}: disclosure row has no disclosure date")
 
     low, high = parse_amount(row.get("amount"))
     return Disclosure(
