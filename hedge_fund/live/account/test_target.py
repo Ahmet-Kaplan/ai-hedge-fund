@@ -40,3 +40,18 @@ def test_latest_paper_weights_freshness(tmp_path):
     ledger.write_plan("2026-09-29", {"plan": {"decision": None}})          # a flatten plan: no bets
     assert latest_paper_weights(ledger, "2026-10-01", 8) == ({}, "2026-09-29", True)
     assert latest_paper_weights(Ledger(tmp_path / "none"), "2026-10-01", 8) == ({}, None, False)
+
+
+from hedge_fund.live.account.settings import LiveSettings  # noqa: E402
+from hedge_fund.live.account.target import account_book  # noqa: E402
+
+
+def test_account_book_splits_halves():
+    book = account_book({"SPY": 0.8, "NVDA": 0.2}, LiveSettings(crypto_share=0.5))
+    assert book == {"SPY": pytest.approx(0.4), "NVDA": pytest.approx(0.1), "BTC/USD": pytest.approx(0.3),
+                    "ETH/USD": pytest.approx(0.15), "SOL/USD": pytest.approx(0.05)}
+    assert sum(book.values()) == pytest.approx(1.0)
+
+
+def test_no_crypto_share_leaves_the_stock_book_alone():
+    assert account_book({"SPY": 1.0}, LiveSettings()) == {"SPY": 1.0}

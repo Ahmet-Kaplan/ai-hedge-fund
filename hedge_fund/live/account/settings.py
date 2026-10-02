@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 
 class LiveSettings(BaseModel):
@@ -29,6 +29,19 @@ class LiveSettings(BaseModel):
     min_trade_pct: float = Field(default=0.005, ge=0, lt=1)
     cash_buffer_pct: float = Field(default=0.01, ge=0, lt=0.5, description="cash left unspent for price moves and fees")
     stale_plan_days: int = Field(default=8, ge=1)
+    crypto_share: float = Field(default=0.0, ge=0, le=0.5, description="fraction of the account in the crypto half")
+    crypto_core: dict[str, float] = Field(
+        default_factory=lambda: {"BTC/USD": 0.6, "ETH/USD": 0.3, "SOL/USD": 0.1},
+        description="crypto half's buy-and-hold weights (Alpaca pairs)")
+
+    @field_validator("crypto_core")
+    @classmethod
+    def _crypto_weights(cls, core: dict[str, float]) -> dict[str, float]:
+        if any("/" not in t for t in core):
+            raise ValueError("crypto_core keys must be Alpaca pairs like 'BTC/USD'")
+        if any(w <= 0 for w in core.values()) or abs(sum(core.values()) - 1) > 1e-6:
+            raise ValueError("crypto_core weights must be positive and sum to 1")
+        return core
 
 
 def load_settings(path: str | Path) -> LiveSettings:

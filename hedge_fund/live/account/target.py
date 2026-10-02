@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
+from hedge_fund.live.account.settings import LiveSettings
 from hedge_fund.live.ledger import Ledger
 
 
@@ -38,3 +39,14 @@ def latest_paper_weights(paper: Ledger, today: str, stale_days: int) -> tuple[di
     weights = {t: w for t, w in decision.get("final_weights", {}).items() if w}
     fresh = (date.fromisoformat(today) - date.fromisoformat(session)).days <= stale_days
     return weights, session, fresh
+
+
+def account_book(stock_book: dict[str, float], settings: LiveSettings) -> dict[str, float]:
+    """The whole account: the stock book scaled to (1 − crypto_share), plus the crypto core."""
+    share = settings.crypto_share
+    if share <= 0:
+        return stock_book
+    book = {t: w * (1 - share) for t, w in stock_book.items()}
+    for t, w in settings.crypto_core.items():
+        book[t] = book.get(t, 0.0) + w * share
+    return book

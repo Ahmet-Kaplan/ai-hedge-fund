@@ -26,3 +26,15 @@ def test_share_capped_and_unknown_keys_rejected(tmp_path):
 def test_missing_file_explains(tmp_path):
     with pytest.raises(ValueError, match="aihf-live init"):
         load_settings(tmp_path / "nope.yaml")
+
+
+def test_crypto_defaults_and_validation():
+    s = LiveSettings()
+    assert s.crypto_share == 0.0
+    assert s.crypto_core == {"BTC/USD": 0.6, "ETH/USD": 0.3, "SOL/USD": 0.1}
+    with pytest.raises(ValueError):
+        LiveSettings(crypto_share=0.6)
+    with pytest.raises(ValueError, match="sum to 1"):
+        LiveSettings(crypto_core={"BTC/USD": 0.5})
+    with pytest.raises(ValueError, match="pair"):
+        LiveSettings(crypto_core={"BTCUSD": 1.0})
