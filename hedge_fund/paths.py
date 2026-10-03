@@ -46,6 +46,12 @@ KILL_SWITCH_PATH = USER_DIR / "KILL"
 EXAMPLE_MANDATE = Path(__file__).resolve().parent / "fund" / "example.yaml"
 
 
+#: Local prices and SEC filings, cached by the free data sources. One SQLite
+#: file rather than a directory of JSON: a backtest reads the same bar on many
+#: sessions, and the store answers from an index instead of re-parsing.
+MARKET_DB_PATH = USER_DIR / "market.db"
+
+
 def ensure_mandates_dir() -> Path:
     """Create the mandates dir on first use, seeded with the example.
 

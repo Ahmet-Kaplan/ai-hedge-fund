@@ -40,7 +40,7 @@ def test_cli_rejects_invalid_configuration_before_clients(tmp_path, monkeypatch,
     monkeypatch.setattr(run, "apply_credentials", lambda: None)
     monkeypatch.setattr(run, "ensure_mandates_dir", lambda: tmp_path)
     monkeypatch.setattr(run, "Fund", forbidden)
-    monkeypatch.setattr(run, "FDClient", forbidden)
+    monkeypatch.setattr(run, "open_data_client", forbidden)
     monkeypatch.setattr(run, "open_venue", forbidden)
     monkeypatch.setattr(sys, "argv", ["aihf", str(path), "--tickers", "AAPL"] + (["--backtest"] if backtest else []))
     with pytest.raises(SystemExit) as exc:
@@ -79,8 +79,7 @@ def test_cli_executes_all_modes_with_offline_clients(tmp_path, monkeypatch, caps
     monkeypatch.setattr(run, "apply_credentials", lambda: None)
     monkeypatch.setattr(run, "ensure_mandates_dir", lambda: tmp_path)
     monkeypatch.setattr(run, "Fund", build_fund)
-    monkeypatch.setattr(run, "FDClient", OfflineClient)
-    monkeypatch.setattr(run, "CachedDataClient", lambda client: client)
+    monkeypatch.setattr(run, "open_data_client", lambda: _open_as(OfflineClient()))
     monkeypatch.setattr(sys, "argv", ["aihf", str(path), "--tickers", "AAPL,MSFT", "--date", as_of] +
                         (["--backtest", "--start", "2025-01-03"] if backtest else []))
     run.main()
@@ -158,6 +157,21 @@ def _fake_fund(spec, blind=False):
     return Fund(spec, models={"solo": [FakeAnalyst("pead", views={"AAPL": 1.0})]})
 
 
+def _open_as(client):
+    """Stand a bare fake in for `open_data_client`, which is a context manager.
+
+    Returns the *entered-ready* manager, not the generator function, so
+    `with open_data_client() as fd:` sees the fake.
+    """
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _manager():
+        yield client
+
+    return _manager()
+
+
 def _patch_cli(monkeypatch, tmp_path, closes):
     from hedge_fund import run
     from hedge_fund.tui import keys
@@ -165,8 +179,7 @@ def _patch_cli(monkeypatch, tmp_path, closes):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(keys, "ENV_PATH", tmp_path / "saved.env")
     monkeypatch.setattr(run, "ensure_mandates_dir", lambda: tmp_path)
-    monkeypatch.setattr(run, "FDClient", lambda: FakeDataClient(closes))
-    monkeypatch.setattr(run, "CachedDataClient", lambda raw: raw)
+    monkeypatch.setattr(run, "open_data_client", lambda: _open_as(FakeDataClient(closes)))
     monkeypatch.setattr(run, "Fund", _fake_fund)
     return run
 

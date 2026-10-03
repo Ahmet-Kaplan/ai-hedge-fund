@@ -353,6 +353,21 @@ def _fake_fund(spec, blind=False):
     return Fund(spec, models={"solo": [FakeAnalyst("pead", views={"AAPL": 1.0})]})
 
 
+def _open_as(client):
+    """Stand a bare fake in for `open_data_client`, which is a context manager.
+
+    Returns the *entered-ready* manager, not the generator function, so
+    `with open_data_client() as fd:` sees the fake.
+    """
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _manager():
+        yield client
+
+    return _manager()
+
+
 def _patch_cli(monkeypatch, tmp_path, client):
     from hedge_fund import run
     from hedge_fund.tui import keys
@@ -360,8 +375,7 @@ def _patch_cli(monkeypatch, tmp_path, client):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(keys, "ENV_PATH", tmp_path / "saved.env")
     monkeypatch.setattr(run, "ensure_mandates_dir", lambda: tmp_path)
-    monkeypatch.setattr(run, "FDClient", lambda: client)
-    monkeypatch.setattr(run, "CachedDataClient", lambda raw: raw)
+    monkeypatch.setattr(run, "open_data_client", lambda: _open_as(client))
     monkeypatch.setattr(run, "Fund", _fake_fund)
     return run
 

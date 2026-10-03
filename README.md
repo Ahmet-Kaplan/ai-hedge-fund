@@ -213,6 +213,46 @@ Three things to know before using it:
 All of its artefacts (cache, logs, memory) are written under this project's
 cache directory rather than a second `~/.tradingagents`.
 
+### Where the data comes from
+
+By default the fund needs **no data subscription**: prices come from Alpaca's
+market data and fundamentals from SEC EDGAR.
+
+```bash
+# default — free, needs an Alpaca key and an SEC contact
+HEDGE_FUND_DATA=free
+SEC_USER_AGENT="Your Name your@email.com"
+APCA_API_KEY_ID=...
+APCA_API_SECRET_KEY=...
+
+# or take everything from Financial Datasets
+HEDGE_FUND_DATA=fd
+FINANCIAL_DATASETS_API_KEY=...
+```
+
+Prices and filings are cached in one SQLite file, `~/.hedge-fund/market.db`, so
+a backtest re-reading the same bar or filing answers from an index instead of
+re-fetching.
+
+**Fundamentals are point-in-time.** Every metric row carries the date its
+filing was *filed*, and the market cap on that row is priced at the close on or
+before that date — so a backtest sees the number the market saw, not the number
+the period ended on. Filings that restate an earlier period are kept both ways:
+the restated value for "what is true now", the original for "what was public
+then".
+
+**The free sources serve prices and SEC fundamentals only.** News, insider
+trades and earnings are not among them, and they *say so* — a `DataSourceError`
+naming what to set — rather than returning an empty list. That distinction
+matters here: `news_sentiment` and `news_analyst` both read news, and an empty
+answer is indistinguishable from a company that had no news, so they would
+abstain on every ticker and the receipt would attribute the silence to the
+company.
+
+If you want those models on a free run, set `FINANCIAL_DATASETS_API_KEY` as
+well: the client is then composed, taking prices and fundamentals from the free
+sources and news from Financial Datasets.
+
 ### What a fill costs
 
 Backtests and paper runs charge the schedule a mandate declares, so a strategy

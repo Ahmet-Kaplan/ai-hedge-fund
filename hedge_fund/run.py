@@ -52,7 +52,7 @@ from pathlib import Path
 from rich.console import Console
 
 from hedge_fund.backtesting import backtest_fund
-from hedge_fund.data import CachedDataClient, FDClient
+from hedge_fund.data import open_data_client
 from hedge_fund.fund import ALLOCATOR_NAMES, Fund, load_spec, normalize_universe
 from hedge_fund.journal import FileOrderJournal, JournalledBroker, journal_summary
 from hedge_fund.ledger import save_cycle_record
@@ -181,8 +181,7 @@ def main() -> None:
         start = args.start or (
             _date.fromisoformat(args.date) - timedelta(weeks=_BACKTEST_WEEKS)
         ).isoformat()
-        with FDClient() as raw:
-            fd = CachedDataClient(raw)
+        with open_data_client() as fd:
             with console.status(
                 f"[cyan]{spec.name}: backtesting {start} → {args.date} "
                 f"({spec.rebalance} rebalance vs {spec.benchmark}) "
@@ -220,7 +219,6 @@ def main() -> None:
             "well if ALPACA_PAPER is false). Use --broker paper to rehearse "
             "without touching the account."
         )
-
     tone = "bold yellow" if venue.live else "dim"
     console.print(f"[{tone}]venue: {venue.label}  ·  {venue.note}[/]")
     if venue.reference is not None:
@@ -237,8 +235,7 @@ def main() -> None:
     journal = FileOrderJournal(journal_path(spec.name))
     broker = JournalledBroker(venue.broker, journal, fund=spec.name, session=args.date)
 
-    with FDClient() as raw:
-        fd = CachedDataClient(raw)
+    with open_data_client() as fd:
         n_models = sum(len(staff) for _, staff in fund.strategies)
         with console.status(
             f"[cyan]{spec.name}: paper cycle as of {args.date} — "

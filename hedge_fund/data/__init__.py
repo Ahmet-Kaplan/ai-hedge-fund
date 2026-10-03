@@ -21,6 +21,8 @@ from hedge_fund.data.models import (
     InsiderTrade,
     Price,
 )
+from hedge_fund.data.factory import data_source, missing_data_keys, open_data_client
+from hedge_fund.data.free import FreeDataClient
 from hedge_fund.data.protocol import DataClient
 
 __all__ = [
@@ -37,6 +39,10 @@ __all__ = [
     "FXMacroDataClient",
     "FXMacroDataClientError",
     "FinancialMetrics",
+    "FreeDataClient",
     "InsiderTrade",
     "Price",
+    "data_source",
+    "missing_data_keys",
+    "open_data_client",
 ]
