@@ -101,18 +101,25 @@ class FundBacktestResult(BaseModel):
 
 
 def backtest_fund(
-    fund: Fund, start: str, end: str, data_client: DataClient, universe: list[str], *,
+    fund: Fund, start: str, end: str, data_client: DataClient,
+    universe: list[str] | Callable[[str], list[str]], *,
     on_cycle: Callable[[int, int, CycleRecord], None] | None = None,
     on_valuation: Callable[[int, int, DailyValuation], None] | None = None,
 ) -> FundBacktestResult:
     """Replay daily marks, executing assessments only on later observed sessions.
+
+    *universe* is either one fixed list or a callable taking the assessment
+    date and returning the names available then. The callable is what makes a
+    survivorship-free backtest possible: a fund that may pick from the S&P 500
+    as it stood each month cannot be given one list chosen with hindsight.
 
     Callbacks receive a zero-based index, the total count, and a record.
     Executed-cycle and valuation counts are independent; the final proposal
     can remain pending without extending the requested window.
     """
     spec = fund.spec
-    universe = normalize_universe(universe)
+    fixed = normalize_universe(universe) if not callable(universe) else None
+    considered: set[str] = set(fixed or [])
     schedule = build_schedule(data_client, spec.benchmark, start, end, spec.rebalance)
     dates = list(schedule.closes)
     broker = SimBroker(cash=spec.capital, commission=spec.commission)
@@ -137,7 +144,11 @@ def backtest_fund(
                 as_of=session, nav=nav[-1], benchmark_nav=benchmark_nav[-1],
             ))
         if session in schedule.execution_dates:
-            proposal = assess_fund(fund, session, data_client, universe)
+            # Resolved at the assessment date, so a rotating universe is asked
+            # what existed then rather than what exists now.
+            today = fixed if fixed is not None else normalize_universe(universe(session))
+            considered.update(today)
+            proposal = assess_fund(fund, session, data_client, today)
             execution = schedule.execution_dates[session]
             if execution is None:
                 pending.append(PendingRunResult(
@@ -148,7 +159,11 @@ def backtest_fund(
                 due[execution] = proposal
     return FundBacktestResult(
         fund=spec.name, start=dates[0], end=dates[-1], rebalance=spec.rebalance,
-        benchmark=spec.benchmark, universe=universe, capital=spec.capital,
+        benchmark=spec.benchmark,
+        # Everyone the run could have picked across its window — for a rotating
+        # universe that is a union, and saying so is more honest than naming
+        # whichever month happened to run last.
+        universe=sorted(considered), capital=spec.capital,
         dates=dates, nav=nav, benchmark_nav=benchmark_nav,
         metrics=performance_metrics(spec.capital, dates, nav, benchmark_nav, records, len(pending)),
         records=records, pending=pending,

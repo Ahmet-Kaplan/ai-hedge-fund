@@ -52,7 +52,10 @@ from pathlib import Path
 from rich.console import Console
 
 from hedge_fund.backtesting import backtest_fund
+from collections.abc import Callable
+
 from hedge_fund.data import open_data_client
+from hedge_fund.data.protocol import DataClient
 from hedge_fund.fund import ALLOCATOR_NAMES, Fund, load_spec, normalize_universe
 from hedge_fund.journal import FileOrderJournal, JournalledBroker, journal_summary
 from hedge_fund.ledger import save_cycle_record
@@ -62,6 +65,28 @@ from hedge_fund.pipeline.models import PendingRunResult
 from hedge_fund.tui.keys import apply_credentials
 from hedge_fund.tui.shared import _BACKTEST_WEEKS
 from hedge_fund.venue import open_venue, VENUES
+
+
+def _pit_universe(
+    data: DataClient,
+    start: str,
+    end: str,
+    size: int,
+) -> Callable[[str], list[str]]:
+    """A survivorship-free universe: the most liquid S&P members per month.
+
+    Membership is reconstructed from the dated change log and ranked by dollar
+    volume from *before* each month begins, so a backtest is offered the names
+    an investor could have chosen then. The candidate set is prefetched once —
+    that is the slow part, and it is why this is opt-in rather than the default.
+    """
+    from hedge_fund.data.store import MarketStore
+    from hedge_fund.data.universe import PointInTimeUniverse
+    from hedge_fund.paths import MARKET_DB_PATH
+
+    universe = PointInTimeUniverse(MarketStore(MARKET_DB_PATH), data, size=size)
+    universe.prefetch(start, end)
+    return universe
 
 
 def main() -> None:
@@ -117,6 +142,22 @@ def main() -> None:
         "reference; it stays read-only until ALPACA_TRADING_ENABLED=1",
     )
     parser.add_argument(
+        "--universe",
+        choices=("fixed", "pit"),
+        default="fixed",
+        help="fixed: the --tickers list for the whole backtest (default). "
+        "pit: the most liquid S&P 500 members as of each assessment date, "
+        "rebuilt from membership history and prior dollar volume — slower "
+        "to start, and the only way a backtest avoids picking today's "
+        "winners. Needs the free data sources.",
+    )
+    parser.add_argument(
+        "--universe-size",
+        type=int,
+        default=25,
+        help="names in each month's universe with --universe pit (default 25)",
+    )
+    parser.add_argument(
         "--allocator",
         choices=sorted(ALLOCATOR_NAMES),
         help="CIO capital-allocation policy (default: the mandate's "
@@ -161,9 +202,21 @@ def main() -> None:
         HedgeFundApp().run()
         return
 
-    if not args.tickers:
+    if not args.tickers and args.universe == "pit":
+        # A point-in-time universe IS the watchlist; naming one as well would
+        # be a second, contradictory answer to the same question.
+        universe = []
+    elif not args.tickers:
         parser.error("--tickers is required with a mandate, e.g. --tickers AAPL,MSFT")
-    universe = normalize_universe(args.tickers.replace(",", " ").split())
+    else:
+        universe = normalize_universe(args.tickers.replace(",", " ").split())
+
+    if args.universe == "pit" and not args.backtest:
+        parser.error(
+            "--universe pit is a backtest option: a live or paper cycle trades "
+            "the tickers you name, because the universe it may pick from has to "
+            "be decided before the run, not recomputed while it is trading."
+        )
 
     console = Console(stderr=True)  # status + summary on stderr; stdout stays pure JSON
     try:
@@ -182,13 +235,21 @@ def main() -> None:
             _date.fromisoformat(args.date) - timedelta(weeks=_BACKTEST_WEEKS)
         ).isoformat()
         with open_data_client() as fd:
+            selection: list[str] | Callable[[str], list[str]] = universe
+            if args.universe == "pit":
+                selection = _pit_universe(fd, start, args.date, args.universe_size)
+            label = (
+                f"{args.universe_size} most liquid S&P members per month"
+                if args.universe == "pit"
+                else ", ".join(universe)
+            )
             with console.status(
                 f"[cyan]{spec.name}: backtesting {start} → {args.date} "
                 f"({spec.rebalance} rebalance vs {spec.benchmark}) "
-                f"over {', '.join(universe)}…",
+                f"over {label}…",
                 spinner="dots",
             ):
-                result = backtest_fund(fund, start, args.date, fd, universe)
+                result = backtest_fund(fund, start, args.date, fd, selection)
         print(result.model_dump_json(indent=2))
         if args.out:
             Path(args.out).write_text(result.model_dump_json(indent=2))

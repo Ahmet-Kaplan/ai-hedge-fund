@@ -344,3 +344,52 @@ def test_commission_round_trips_through_the_mandate():
     reloaded = FundSpec.model_validate_json(spec.model_dump_json())
 
     assert reloaded.commission == Commission(per_trade=1.5, per_share=0.02)
+
+
+# ---------------------------------------------------------------------------
+# A rotating universe
+# ---------------------------------------------------------------------------
+
+def test_a_callable_universe_is_resolved_per_assessment_date():
+    """The point of the callable: the names a fund may pick on a past date are
+    the ones that existed then, not the ones that exist now."""
+    asked: list[str] = []
+
+    def universe(as_of: str) -> list[str]:
+        asked.append(as_of)
+        return ["AAPL"] if as_of < "2024-06-14" else ["MSFT"]
+
+    spec = _spec()
+    fund = Fund(spec, models={"solo": [FakeAnalyst("a", views={"AAPL": 1.0, "MSFT": 1.0})]})
+
+    result = backtest_fund(fund, "2024-06-03", "2024-06-21", FakeDataClient(SERIES), universe)
+
+    assert asked, "the universe was never consulted"
+    assert asked == sorted(asked), "dates should be asked in order"
+    # The record names everyone it could have picked, not just the last month.
+    assert result.universe == ["AAPL", "MSFT"]
+
+
+def test_a_fixed_list_is_still_exactly_that():
+    """The default must not change: one list, recorded as given."""
+    result = _run()
+
+    assert result.universe == ["AAPL"]
+
+
+def test_a_rotating_universe_can_hold_a_name_it_later_drops():
+    """A name bought while it was in the universe must still be marked after it
+    leaves — otherwise the book is valued against a list, not against prices."""
+    def universe(as_of: str) -> list[str]:
+        return ["AAPL"] if as_of < "2024-06-14" else ["MSFT"]
+
+    fund = Fund(_spec(), models={"solo": [FakeAnalyst("a", views={"AAPL": 1.0, "MSFT": 1.0})]})
+
+    result = backtest_fund(fund, "2024-06-03", "2024-06-21", FakeDataClient(SERIES), universe)
+
+    # Marks come from prices by ticker, not from the universe, so a holding
+    # that has rotated out is still valued. A book valued against the list
+    # would show up as a zero or missing mark, and the NAV would collapse.
+    assert result.nav and all(v > 0 for v in result.nav)
+    held_somewhere = {t for r in result.records for t in r.positions}
+    assert "AAPL" in held_somewhere                          # bought while eligible
