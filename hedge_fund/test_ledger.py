@@ -14,8 +14,10 @@ from hedge_fund.data.models import Price
 from hedge_fund.fund.spec import Fund, FundSpec
 from hedge_fund.ledger import (
     broker_for_run,
+    latest_reference,
     latest_run_receipt,
     load_cycle_record,
+    run_receipt_paths,
     save_cycle_record,
 )
 from hedge_fund.models import Signal
@@ -277,3 +279,73 @@ def test_backtest_starts_from_mandate_capital_despite_receipt(tmp_path):
     assert first.positions == {"AAPL": 476}
     # The fixture book (100 AAPL / -25 MSFT / 90k cash) was not used.
     assert first.positions != {"AAPL": 100, "MSFT": -25}
+
+
+# ---------------------------------------------------------------------------
+# A pending proposal is not a receipt
+# ---------------------------------------------------------------------------
+
+class TestPendingProposalsDoNotShadowTheBook:
+    """Found by running two paper cycles on a weekend.
+
+    The first run had no completed session to execute against, so it wrote a
+    proposal. The second then picked that proposal as "the newest receipt" and
+    failed to load it as a completed record — `orders`, `fills`, `positions`,
+    `cash` and `nav` are all absent from a proposal, because nothing was
+    traded. Two runs in a row is not an exotic sequence.
+    """
+
+    def _proposal(self):
+        """A real proposal shape, derived from the valid receipt.
+
+        Built rather than hand-written so a field added to `DecisionRecord`
+        cannot quietly make this test construct something the pipeline never
+        would.
+        """
+        from hedge_fund.pipeline.models import DecisionRecord, PendingRunResult
+
+        cycle = load_cycle_record(VALID, expected_fund="alpha-one")
+        decision = DecisionRecord(
+            fund=cycle.fund, as_of=cycle.as_of, spec=cycle.spec,
+            universe=cycle.universe, marks=cycle.marks, skipped=cycle.skipped,
+            strategies=cycle.strategies, target_weights=cycle.target_weights,
+            clamps=cycle.clamps, final_weights=cycle.final_weights,
+        )
+        return PendingRunResult(
+            fund=cycle.fund, as_of=cycle.as_of, proposal=decision,
+            reason="No subsequent completed benchmark session is available.",
+        )
+
+    def test_a_proposal_is_not_written_on_a_receipt_path(self, tmp_path):
+        path = save_cycle_record(self._proposal(), tmp_path)
+
+        assert "proposal" in path.name
+        assert latest_run_receipt("alpha-one", tmp_path) is None
+        assert run_receipt_paths("alpha-one", tmp_path) == []
+
+    def test_a_proposal_does_not_hide_an_earlier_receipt(self, tmp_path):
+        receipt = _place(tmp_path, VALID)                # a real completed run
+        save_cycle_record(self._proposal(), tmp_path)     # then a weekend run
+
+        assert latest_run_receipt("alpha-one", tmp_path) == receipt
+        reference = latest_reference("alpha-one", tmp_path)
+        assert reference is not None and reference.source  # loadable, not the proposal
+
+    def test_the_proposal_is_still_kept_for_the_operator(self, tmp_path):
+        """It must not be dropped — it is the intent, and it is what the
+        receipt cannot yet say."""
+        path = save_cycle_record(self._proposal(), tmp_path)
+
+        assert path.exists()
+        import json
+
+        assert json.loads(path.read_text())["status"] == "pending"
+
+    def test_the_next_paper_run_still_seeds_from_the_real_receipt(self, tmp_path):
+        _place(tmp_path, VALID)
+        save_cycle_record(self._proposal(), tmp_path)
+
+        broker, record = broker_for_run("alpha-one", capital=1.0, directory=tmp_path)
+
+        assert record is not None                     # seeded, not opened at capital
+        assert broker.cash() == pytest.approx(record.cash)

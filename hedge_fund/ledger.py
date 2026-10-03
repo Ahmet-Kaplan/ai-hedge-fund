@@ -18,13 +18,25 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from hedge_fund.brokers.paper import PaperBroker
-from hedge_fund.pipeline.models import CycleRecord
+from hedge_fund.pipeline.models import CycleRecord, PendingRunResult
 from hedge_fund.reconciliation import LedgerReference
 
 
+#: A completed run writes `{fund}-run-*.json`; a pending proposal writes
+#: `{fund}-proposal-*.json`. The split is load-bearing — see `save_cycle_record`.
+RUN_KIND = "run"
+PROPOSAL_KIND = "proposal"
+
+
 def run_receipt_paths(fund_name: str, directory: Path) -> list[Path]:
-    """This mandate's `{name}-run-*.json` receipts, newest first by mtime."""
-    paths = list(directory.glob(f"{fund_name}-run-*.json"))
+    """This mandate's `{name}-run-*.json` receipts, newest first by mtime.
+
+    A pending proposal is deliberately absent: it is not a book. It is written
+    under `{name}-proposal-*.json`, because a proposal on this path becomes
+    "the newest receipt", and the next paper run then fails to load it as a
+    completed record. Anyone who ran on a Saturday and ran again would hit it.
+    """
+    paths = list(directory.glob(f"{fund_name}-{RUN_KIND}-*.json"))
     return sorted(paths, key=lambda p: p.stat().st_mtime, reverse=True)
 
 
@@ -78,11 +90,19 @@ def load_cycle_record(
     return record
 
 
-def save_cycle_record(record: CycleRecord, directory: Path) -> Path:
-    """Write *record* as this mandate's newest run receipt. Returns the path."""
+def save_cycle_record(record: CycleRecord | PendingRunResult, directory: Path) -> Path:
+    """Write *record* as this mandate's newest run receipt, or — for a
+    proposal waiting on a completed session — as a proposal beside it.
+
+    The two are different things and get different names. A pending proposal
+    describes an intent that has not been priced yet, so it is not a reference
+    book: `latest_reference` and `broker_for_run` must not find it, or the next
+    run tries to reconcile against a book that was never traded.
+    """
     directory.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
-    path = directory / f"{record.fund}-run-{stamp}.json"
+    kind = PROPOSAL_KIND if isinstance(record, PendingRunResult) else RUN_KIND
+    path = directory / f"{record.fund}-{kind}-{stamp}.json"
     path.write_text(record.model_dump_json(indent=2))
     return path
 
