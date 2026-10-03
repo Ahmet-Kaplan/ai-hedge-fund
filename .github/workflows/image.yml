@@ -1,0 +1,107 @@
+# Builds the runtime image, and only ever from a tag.
+#
+# Every image in the registry should trace back to a named commit. Before
+# this existed each one was built by hand at deploy time, which is how the
+# package version came to sit at 2.5.0 while the tags climbed to v2.12.0 and
+# the ledger lost its ability to say which code wrote a record.
+#
+# This workflow does not deploy. Promoting an image to the tick job or the
+# dashboard stays a separate, deliberate act, so a tag can be published and
+# inspected before anything in production starts running it.
+name: image
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  # Required for the OIDC exchange below. The registry has no admin user, and
+  # no long-lived credential is stored in this repository.
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: aihfacrxtsuq5xq64jpi
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Pinned to match the Dockerfile: pyproject caps numpy below 2.0 and
+          # numpy 1.x publishes no wheels for 3.13+.
+          python-version: "3.12"
+
+      # The drift this repository already suffered, turned into a gate. An
+      # image tagged v2.13.0 whose package reports something else makes
+      # code_version unable to identify the build, which is the one question
+      # a hash-chained ledger exists to answer.
+      - name: Tag must match the package version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['tool']['poetry']['version'])")
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match pyproject version ${pkg}"
+            exit 1
+          fi
+          echo "building ${GITHUB_REF_NAME} from version ${pkg}"
+
+      # Unpinned, exactly as the Dockerfile installs it, so the tests run
+      # against the dependency set the image will actually ship.
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[azure,web]" pytest
+
+      # No API keys are configured, so the live-vendor tests skip themselves.
+      # That is intended: this gate is about not publishing an image whose
+      # own logic is broken, not about vendor availability.
+      - name: Test
+        run: pytest -q
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Built inside ACR rather than on the runner: no Docker daemon, no
+      # registry password, and the push is part of the same operation.
+      #
+      # AIHF_REVISION is the whole point of building here rather than by
+      # hand. The runtime image carries no .git, so without this stamp every
+      # record a container writes falls back to the bare package version.
+      - name: Build and push
+        run: |
+          set -euo pipefail
+          az acr build \
+            --registry "$REGISTRY" \
+            --image "aihf:${GITHUB_REF_NAME}" \
+            --build-arg "AIHF_REVISION=${GITHUB_SHA::7}" \
+            .
+
+      - name: Summary
+        run: |
+          {
+            echo "### Image published"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| tag | \`${GITHUB_REF_NAME}\` |"
+            echo "| revision | \`${GITHUB_SHA::7}\` |"
+            echo "| code_version | \`${GITHUB_REF_NAME#v}+${GITHUB_SHA::7}\` |"
+            echo
+            echo "Nothing was deployed. Promote it with:"
+            echo '```'
+            echo "az containerapp job update -n aihf-tick -g rg-aihf-paper \\"
+            echo "  --image ${REGISTRY}.azurecr.io/aihf:${GITHUB_REF_NAME}"
+            echo "az containerapp update -n aihf-web -g rg-aihf-paper \\"
+            echo "  --image ${REGISTRY}.azurecr.io/aihf:${GITHUB_REF_NAME}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
