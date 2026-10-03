@@ -9,6 +9,7 @@ installed.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, replace
 
 import pytest
@@ -494,6 +495,12 @@ def test_blocked_account_is_reported_as_blocked():
 def test_calendar_reports_sessions_and_half_days():
     from datetime import date, datetime
 
+    # `calendar()` builds a real SDK request object, so this needs the optional
+    # package like its siblings. Without the guard the test fails rather than
+    # skips on any machine — or CI — that has not installed alpaca-py, which is
+    # not a declared dependency.
+    pytest.importorskip("alpaca")
+
     # Alpaca returns a date for `date` and *datetimes* for open/close, which
     # is exactly the shape that made str()[:5] render as "2024-".
     client = FakeClient(calendar_days=[
@@ -510,3 +517,25 @@ def test_calendar_reports_sessions_and_half_days():
     assert sessions[1]["close"] == "13:00"
     assert broker.is_trading_day("2024-11-27") is True
     assert broker.is_trading_day("2024-11-28") is False   # Thanksgiving
+
+
+# ---------------------------------------------------------------------------
+# The optional dependency must fail legibly
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("call", [
+    lambda b: b.calendar("2024-11-27", "2024-11-29"),
+    lambda b: b.open_orders(),
+    lambda b: b.place_order(Order(ticker="AAPL", side="buy", quantity=1, price=1.0)),
+])
+def test_a_missing_sdk_names_the_install_command(monkeypatch, call):
+    """A bare ModuleNotFoundError tells the user nothing actionable.
+
+    Forced rather than relying on the package being absent, so the assertion
+    holds on a machine that does have alpaca-py installed too.
+    """
+    monkeypatch.setitem(sys.modules, "alpaca", None)   # makes `import alpaca` fail
+    broker = _broker(FakeClient())
+
+    with pytest.raises(ImportError, match="pip install alpaca-py"):
+        call(broker)

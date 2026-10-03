@@ -148,3 +148,66 @@ class TestPEADPredict:
         fd = MockFDClient([_rec("2025-06-30", "2025-08-01", "BEAT")])
         sig = PEADModel().predict("TEST", "2025-08-01", fd)
         assert isinstance(sig, Signal)
+
+
+class TestPEADAbstainsRatherThanVoting:
+    """PEAD's silence must be an omission, not a neutral opinion.
+
+    `blend_signals` keeps any signal that is not flagged `abstained`
+    (portfolio/construction.py), so an unmarked 0.0 dilutes every model that
+    did form a view and never shows up in the receipt's dropped outputs.
+    `momentum`, `mean_reversion` and `news_sentiment` already comply; PEAD was
+    the outlier. Ported from PR #24's `de6c727`, which caught it.
+    """
+
+    def _abstained(self, sig):
+        assert sig.value == 0.0
+        assert sig.metadata["abstained"] is True
+        assert sig.metadata["abstain_reason"]
+        assert sig.reasoning.startswith("abstained:")
+
+    def test_no_surprise_on_file_abstains(self):
+        self._abstained(PEADModel().predict("TEST", "2025-08-01", MockFDClient([])))
+
+    def test_a_meet_abstains(self):
+        fd = MockFDClient([_rec("2025-06-30", "2025-08-01", "MEET")])
+        self._abstained(PEADModel().predict("TEST", "2025-08-01", fd))
+
+    def test_a_stale_event_abstains_and_says_how_stale(self):
+        fd = MockFDClient([_rec("2025-06-30", "2025-08-01", "BEAT")])
+        sig = PEADModel().predict("TEST", "2025-08-31", fd)
+        self._abstained(sig)
+        assert "30 days old" in sig.metadata["abstain_reason"]
+        assert "drift window" in sig.metadata["abstain_reason"]
+
+    def test_a_future_filing_abstains(self):
+        fd = MockFDClient([_rec("2025-06-30", "2025-08-01", "BEAT")])
+        self._abstained(PEADModel().predict("TEST", "2025-07-15", fd))
+
+    def test_a_real_surprise_still_votes(self):
+        """The fix must not silence the signal PEAD exists to produce."""
+        fd = MockFDClient([_rec("2025-06-30", "2025-08-01", "BEAT")])
+        sig = PEADModel().predict("TEST", "2025-08-01", fd)
+        assert sig.value == 1.0
+        assert sig.metadata.get("abstained") is not True
+
+    def test_an_abstention_is_excluded_from_the_blend(self):
+        """What the flag is for, measured: an unmarked 0.0 halves a real view."""
+        from hedge_fund.models import Signal
+        from hedge_fund.portfolio.construction import blend_signals
+
+        weights = {"pead": 1.0, "buffett": 1.0}
+        approaches = {"pead": "long_short", "buffett": "long_short"}
+        voted = Signal(model_name="buffett", ticker="TEST", date="2025-08-01", value=1.0)
+
+        def blend(pead):
+            return blend_signals([pead, voted], weights, gross_target=1.0,
+                                 mode="long_short", investment_approaches=approaches)
+
+        abstention = PEADModel().predict("TEST", "2025-08-01", MockFDClient([]))
+        voting = Signal(model_name="pead", ticker="TEST", date="2025-08-01", value=0.0)
+
+        assert blend(abstention).convictions["TEST"] == pytest.approx(1.0)
+        # The bug this replaced: PEAD's silence counted as a neutral opinion
+        # and diluted the only model that actually had a view.
+        assert blend(voting).convictions["TEST"] == pytest.approx(0.5)

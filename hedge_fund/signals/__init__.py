@@ -9,6 +9,7 @@ from hedge_fund.signals.base import AlphaModel, InvestmentApproach, QuantModel
 from hedge_fund.signals.buffett import BuffettAgent
 from hedge_fund.signals.burry import BurryAgent
 from hedge_fund.signals.damodaran import DamodaranAgent
+from hedge_fund.signals.dpx_macro import DPXMacroStabilityModel
 from hedge_fund.signals.druckenmiller import DruckenmillerAgent
 from hedge_fund.signals.fisher import FisherAgent
 from hedge_fund.signals.graham import GrahamAgent
@@ -51,6 +52,8 @@ ALPHA_MODEL_REGISTRY: dict[str, type[AlphaModel]] = {
     "jhunjhunwala": JhunjhunwalaAgent,
     # External research framework (optional dependency, no blind mode)
     "ta_board": TradingAgentsBoard,
+    # Market-wide regime overlay (live-only; abstains on historical dates)
+    "dpx_macro": DPXMacroStabilityModel,
 }
 
 
@@ -86,6 +89,7 @@ __all__ = [
     "WoodAgent",
     "BurryAgent",
     "AckmanAgent",
+    "DPXMacroStabilityModel",
     "DamodaranAgent",
     "FisherAgent",
     "PabraiAgent",

@@ -64,7 +64,10 @@ class PEADModel(QuantModel):
         # Point-in-time: only consider filings on or before `date` (no lookahead)
         past = [e for e in events if _parse_date(e["filing_date"]) <= as_of]
         if not past:
-            return self._neutral(ticker, date)
+            return self._abstain(
+                ticker, date,
+                "no BEAT/MISS surprise on file on or before this date",
+            )
 
         # Most recent qualifying event as of `date`
         event = max(past, key=lambda e: e["filing_date"])
@@ -72,7 +75,12 @@ class PEADModel(QuantModel):
 
         # Only fire if the event is fresh (we just learned about it)
         if (as_of - filed).days > self._signal_window_days:
-            return self._neutral(ticker, date)
+            return self._abstain(
+                ticker, date,
+                f"last surprise filed {event['filing_date']} is "
+                f"{(as_of - filed).days} days old, outside the "
+                f"{self._signal_window_days}-day drift window",
+            )
 
         surprise = event["surprise"]
         value = 1.0 if surprise == "BEAT" else -1.0
@@ -97,8 +105,27 @@ class PEADModel(QuantModel):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _neutral(self, ticker: str, date: str) -> Signal:
-        return Signal(model_name=self.name, ticker=ticker, date=date, value=0.0)
+    def _abstain(self, ticker: str, date: str, why: str) -> Signal:
+        """No view, and *marked* as such.
+
+        A bare 0.0 is not an omission here: `blend_signals` keeps any signal
+        that is not flagged `abstained`, so an unmarked neutral votes and
+        dilutes every model that did form a view (see the note in
+        `hedge_fund/portfolio/construction.py`). It also keeps the silence out
+        of `DroppedOutput`, so the receipt cannot show that PEAD sat this one
+        out. `momentum`, `mean_reversion` and `news_sentiment` already follow
+        this contract; PEAD was the outlier.
+
+        (Ported from PR #24's `de6c727`, which spotted it.)
+        """
+        return Signal(
+            model_name=self.name,
+            ticker=ticker,
+            date=date,
+            value=0.0,
+            reasoning=f"abstained: {why}",
+            metadata={"abstained": True, "abstain_reason": why},
+        )
 
     def _qualifying_events(self, ticker: str, data_client: DataClient) -> list[dict]:
         """Return BEAT/MISS events for a ticker, deduped + retrospective-filtered.

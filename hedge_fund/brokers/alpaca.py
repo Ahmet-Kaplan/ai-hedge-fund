@@ -245,6 +245,7 @@ class AlpacaBroker:
         if bool(getattr(account, "account_blocked", False)) or bool(getattr(account, "trading_blocked", False)):
             raise AlpacaOrderError("account is blocked from trading", order_id=None)
 
+        _require_alpaca()
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import MarketOrderRequest
 
@@ -340,6 +341,7 @@ class AlpacaBroker:
 
         Bars cannot tell you a half-day from a holiday; the venue can.
         """
+        _require_alpaca()
         from alpaca.trading.requests import GetCalendarRequest
 
         days = self._client.get_calendar(GetCalendarRequest(start=start, end=end))
@@ -357,6 +359,7 @@ class AlpacaBroker:
 
     def open_orders(self) -> list[dict[str, Any]]:
         """Working orders, for reconciliation."""
+        _require_alpaca()
         from alpaca.trading.enums import QueryOrderStatus
         from alpaca.trading.requests import GetOrdersRequest
 
@@ -519,14 +522,25 @@ def _hhmm(value: Any) -> str:
     return str(value)[:5]
 
 
-def _make_trading_client(settings: AlpacaSettings) -> Any:
-    """Build the SDK client, naming the install command when it is missing."""
+def _require_alpaca() -> None:
+    """Name the install command when the optional SDK is absent.
+
+    `alpaca-py` is deliberately not a core dependency, so every lazy import in
+    this module is a place a user without it lands. A bare ModuleNotFoundError
+    tells them nothing; this says what to run.
+    """
     try:
-        from alpaca.trading.client import TradingClient
+        import alpaca  # noqa: F401
     except ImportError as exc:
         raise ImportError(
             "AlpacaBroker needs the optional alpaca-py package: pip install alpaca-py"
         ) from exc
+
+
+def _make_trading_client(settings: AlpacaSettings) -> Any:
+    """Build the SDK client, naming the install command when it is missing."""
+    _require_alpaca()
+    from alpaca.trading.client import TradingClient
     return TradingClient(
         api_key=settings.api_key,
         secret_key=settings.secret_key,

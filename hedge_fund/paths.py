@@ -47,10 +47,18 @@ EXAMPLE_MANDATE = Path(__file__).resolve().parent / "fund" / "example.yaml"
 
 
 def ensure_mandates_dir() -> Path:
-    """Create the mandates dir on first use, seeded with the example."""
+    """Create the mandates dir on first use, seeded with the example.
+
+    `copyfile`, not `copy`: `copy` also transfers permissions, and on a mounted
+    filesystem that does not accept chmod (SMB, Azure Files, some NFS) that
+    raises EPERM — killing this before any subcommand can run. The mandate dir
+    only needs the bytes.
+
+    (Ported from PR #24's `f3cd7d5`, which hit this on Azure Files.)
+    """
     if not MANDATES_DIR.exists():
         MANDATES_DIR.mkdir(parents=True)
-        shutil.copy(EXAMPLE_MANDATE, MANDATES_DIR / "example.yaml")
+        shutil.copyfile(EXAMPLE_MANDATE, MANDATES_DIR / "example.yaml")
     return MANDATES_DIR
 
 
