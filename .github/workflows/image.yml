@@ -24,6 +24,13 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Not for approvals — this is what makes the OIDC login possible at all.
+    # The token's subject would otherwise name the tag being built, and Azure
+    # matches subjects exactly, so a credential could only ever authorise one
+    # tag. Running in an environment makes the subject
+    # `...:environment:release` for every tag alike, and the environment's own
+    # `v*` tag policy is what keeps anything else from borrowing it.
+    environment: release
     env:
       REGISTRY: aihfacrxtsuq5xq64jpi
 
