@@ -139,7 +139,7 @@ before it sizes anything, refuses to trade if the venue is still holding an
 order, and journals every submission. Until trading is enabled it stops with a
 read-only message rather than failing on the first order mid-cycle.
 
-Order submission is gated three times over, so a half-remembered environment
+Order submission is gated four times over, so a half-remembered environment
 variable cannot move real money:
 
 | Variable | Default | Effect |
@@ -147,6 +147,12 @@ variable cannot move real money:
 | `ALPACA_PAPER` | `true` | paper endpoint; reads always work |
 | `ALPACA_TRADING_ENABLED` | `false` | required before *any* order is submitted |
 | `ALPACA_LIVE_TRADING_CONFIRMED` | `false` | additionally required when `ALPACA_PAPER=false` |
+| `ALPACA_LIVE_KEY_ID` / `ALPACA_LIVE_SECRET_KEY` | unset | the credential a live run must use |
+
+A live run reads its credential from the `ALPACA_LIVE_*` variables and refuses
+the paper key — so `ALPACA_PAPER=false` cannot re-point the key your paper runs
+have been using at real money. A key carrying Alpaca's `PK` paper prefix is
+refused on a live run even when it arrives through the live variables.
 
 `ALPACA_API_SECRET` is accepted as an alias for `ALPACA_SECRET_KEY`.
 
