@@ -64,6 +64,19 @@ class BlendPolicy(BaseModel):
     method: Literal["conviction_weighted"] = "conviction_weighted"
     gross_target: float = Field(default=1.0, gt=0, description="desired sum of |weights| when views exist")
     mode: PortfolioMode
+    max_name_weight: float | None = Field(
+        default=None,
+        gt=0,
+        description="cap on any one name as a fraction of the sleeve; excess goes to the "
+        "side's other names in proportion to their scores, and what the cap cannot place "
+        "stays in cash. None leaves sizing unconstrained.",
+    )
+    sizing: Literal["conviction", "inverse_vol"] = Field(
+        default="conviction",
+        description="conviction: weight proportional to the blended view (today's "
+        "behavior). inverse_vol: proportional to view / 60-day volatility, so each "
+        "position carries similar risk.",
+    )
 
 
 class StrategySpec(BaseModel):

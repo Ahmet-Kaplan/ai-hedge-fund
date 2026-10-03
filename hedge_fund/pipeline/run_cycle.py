@@ -18,6 +18,8 @@ frozen fundamentals (D/E, ROE, ...), even if the live feed moves.
 from __future__ import annotations
 
 import logging
+import math
+import statistics
 from datetime import date as _date
 from datetime import timedelta
 from math import isfinite
@@ -100,6 +102,15 @@ def assess_fund(
         [s.name for s, _ in fund.strategies],
     )
 
+    # Computed once for the whole cycle, and only when a sleeve asks for it:
+    # the volatility of every tradable name over the same window, so two
+    # strategies sizing by risk cannot describe different windows.
+    volatilities = (
+        _volatilities(tradeable, as_of, data_client)
+        if any(s.blend.sizing == "inverse_vol" for s, _ in fund.strategies)
+        else None
+    )
+
     # Each strategy runs its own analysts and blends its own sleeve; the fund
     # nets the sleeves by capital slice. A persona staffed into two strategies
     # is asked twice, but the second ask is a prompt-cache hit, not spend.
@@ -117,6 +128,8 @@ def assess_fund(
                 signals, strategy.model_weights, strategy.blend.gross_target,
                 mode=strategy.blend.mode,
                 investment_approaches={m.name: get_investment_approach(m.name) for m in strategy.models},
+                max_name_weight=strategy.blend.max_name_weight,
+                volatilities=(volatilities if strategy.blend.sizing == "inverse_vol" else None),
             )
             slice_ = slices[strategy.name]
             for ticker, weight in blend.weights.items():
@@ -318,6 +331,34 @@ def _mark_prices(
             ))
 
     return marks, skipped
+
+
+_VOL_WINDOW_DAYS = 90      # calendar days, roughly 60 sessions
+_VOL_MIN_RETURNS = 20      # below this a name has no usable volatility
+
+
+def _volatilities(tickers: list[str], as_of: str, data_client: DataClient) -> dict[str, float]:
+    """Annualized volatility of daily returns up to *as_of*, per ticker.
+
+    Names without enough history are left out rather than given a guess;
+    `_risk_scaled` gives them the median of the rest, and a name with no
+    volatility at all keeps its conviction weighting.
+
+    Volatility is only ever read from closes on or before *as_of*, so this is
+    as point-in-time as the marks the cycle trades at.
+    """
+    start = (_date.fromisoformat(as_of) - timedelta(days=_VOL_WINDOW_DAYS)).isoformat()
+    out: dict[str, float] = {}
+    for ticker in tickers:
+        closes = [
+            price.close
+            for price in sorted(data_client.get_prices(ticker, start, as_of), key=lambda p: p.time)
+            if start <= price.time[:10] <= as_of
+        ]
+        returns = [later / earlier - 1 for earlier, later in zip(closes, closes[1:]) if earlier > 0]
+        if len(returns) >= _VOL_MIN_RETURNS:
+            out[ticker] = statistics.stdev(returns) * math.sqrt(252)
+    return out
 
 
 def _dropped_outputs(signals: list[Signal], strategy: str) -> list[DroppedOutput]:

@@ -1,6 +1,8 @@
 """run_cycle end-to-end tests — fake data client + fake analysts + real SimBroker."""
 
 import json
+from datetime import date as _date
+from datetime import timedelta
 
 import pytest
 
@@ -753,3 +755,104 @@ def test_insufficient_history_is_dropped_with_reason(tmp_path):
     assert drop.strategy == "value"
     assert "insufficient data" in drop.reason
     assert record.strategies[0].signals[0].metadata["abstained"] is True
+
+
+# ---------------------------------------------------------------------------
+# Sizing: risk-scaled weights and the per-name cap
+# ---------------------------------------------------------------------------
+
+def _series_client(series):
+    from hedge_fund.backtesting.test_fund import FakeDataClient as SeriesClient
+
+    return SeriesClient(series)
+
+
+def _alt_days(n: int, start=_date(2024, 3, 1)):
+    return [(start + timedelta(days=i)).isoformat() for i in range(n)]
+
+
+def test_inverse_vol_sizing_reads_price_history():
+    """A calmer name carries more weight for the same view.
+
+    Four times the volatility should be a quarter of the position, which is the
+    whole point of sizing by risk rather than by conviction alone.
+    """
+    days = _alt_days(95)
+    calm = {day: 100 * (1.005 if i % 2 else 0.995) for i, day in enumerate(days)}
+    wild = {day: 100 * (1.02 if i % 2 else 0.98) for i, day in enumerate(days)}
+    spec = _spec(strategies=[{"name": "solo", "models": [{"name": "a"}],
+                              "blend": {"mode": "long_short", "sizing": "inverse_vol"}}],
+                 max_position_pct=1.0)
+    fund = Fund(spec, models={"solo": [FakeAnalyst("a", views={"CALM": 1.0, "WILD": 1.0})]})
+
+    decision = assess_fund(fund, days[-1], _series_client(
+        {"CALM": calm, "WILD": wild, "SPY": calm}), ["CALM", "WILD"])
+
+    assert decision.final_weights["CALM"] > decision.final_weights["WILD"]
+    assert decision.final_weights["CALM"] == pytest.approx(0.8, abs=0.02)
+
+
+def test_conviction_sizing_is_the_default_and_ignores_volatility():
+    """A mandate that does not ask for risk scaling must price as it always did."""
+    days = _alt_days(95)
+    calm = {day: 100 * (1.005 if i % 2 else 0.995) for i, day in enumerate(days)}
+    wild = {day: 100 * (1.02 if i % 2 else 0.98) for i, day in enumerate(days)}
+    spec = _spec(strategies=[{"name": "solo", "models": [{"name": "a"}]}], max_position_pct=1.0)
+    fund = Fund(spec, models={"solo": [FakeAnalyst("a", views={"CALM": 1.0, "WILD": 1.0})]})
+
+    decision = assess_fund(fund, days[-1], _series_client(
+        {"CALM": calm, "WILD": wild, "SPY": calm}), ["CALM", "WILD"])
+
+    assert decision.final_weights["CALM"] == pytest.approx(0.5, abs=0.001)
+
+
+def test_volatility_reads_only_closes_on_or_before_the_as_of_date():
+    """The window is point-in-time, like the marks the cycle trades at."""
+    from hedge_fund.pipeline.run_cycle import _volatilities
+
+    days = _alt_days(80)
+    series = {day: 100 * (1.01 if i % 2 else 0.99) for i, day in enumerate(days)}
+    series[days[-1]] = 5.0            # a violent move *after* the as-of date
+
+    as_of = days[-2]
+    window = _volatilities(["TEST"], as_of, _series_client({"TEST": series}))
+    with_spike = _volatilities(["TEST"], days[-1], _series_client({"TEST": series}))
+
+    assert window and with_spike
+    assert window["TEST"] < with_spike["TEST"]     # the later move did not leak back
+
+
+def test_a_name_without_enough_history_gets_no_volatility():
+    """Left out rather than guessed; the blender gives it the median."""
+    from hedge_fund.pipeline.run_cycle import _volatilities
+
+    days = _alt_days(10)
+    series = {day: 100.0 + i for i, day in enumerate(days)}
+
+    assert _volatilities(["THIN"], days[-1], _series_client({"THIN": series})) == {}
+
+
+def test_a_mandate_can_cap_a_name():
+    """The cap rides the blend policy, so it is data, not code."""
+    spec = _spec(strategies=[{"name": "solo", "models": [{"name": "a"}],
+                              "blend": {"mode": "long_short", "max_name_weight": 0.3}}])
+    assert spec.strategies[0].blend.max_name_weight == pytest.approx(0.3)
+
+
+def test_the_cap_and_sizing_round_trip_through_the_mandate():
+    spec = _spec(strategies=[{"name": "solo", "models": [{"name": "a"}],
+                              "blend": {"mode": "long_short", "sizing": "inverse_vol",
+                                        "max_name_weight": 0.4}}])
+
+    reloaded = FundSpec.model_validate_json(spec.model_dump_json())
+
+    assert reloaded.strategies[0].blend.sizing == "inverse_vol"
+    assert reloaded.strategies[0].blend.max_name_weight == pytest.approx(0.4)
+
+
+def test_an_unknown_sizing_mode_is_rejected():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        _spec(strategies=[{"name": "solo", "models": [{"name": "a"}],
+                           "blend": {"mode": "long_short", "sizing": "risk_parity"}}])

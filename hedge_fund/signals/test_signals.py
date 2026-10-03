@@ -211,3 +211,37 @@ class TestPEADAbstainsRatherThanVoting:
         # The bug this replaced: PEAD's silence counted as a neutral opinion
         # and diluted the only model that actually had a view.
         assert blend(voting).convictions["TEST"] == pytest.approx(0.5)
+
+
+class TestEqualWeightBenchmark:
+    """The yardstick, not an alpha model: a full long view on every name.
+
+    Run through the identical engine it answers "did the analysts beat simply
+    owning the universe?" — a sharper question for a large-cap book than
+    beating SPY.
+    """
+
+    def test_it_is_registered_and_long_only(self):
+        from hedge_fund.signals import ALPHA_MODEL_REGISTRY, get_investment_approach
+        from hedge_fund.signals.equal_weight import EqualWeightModel
+
+        assert ALPHA_MODEL_REGISTRY["equal_weight"] is EqualWeightModel
+        assert get_investment_approach("equal_weight") == "long_only"
+
+    def test_it_asks_for_nothing_and_wants_every_name(self):
+        """It must not touch the data client: a benchmark that needs data the
+        strategy under test does not would not be a like-for-like comparison."""
+        from hedge_fund.signals.equal_weight import EqualWeightModel
+
+        signal = EqualWeightModel().predict("ANY", "2025-01-10", None)
+
+        assert (signal.model_name, signal.ticker, signal.value) == ("equal_weight", "ANY", 1.0)
+        assert signal.metadata.get("abstained") is not True
+
+    def test_it_has_no_opinion_per_name(self):
+        from hedge_fund.signals.equal_weight import EqualWeightModel
+
+        model = EqualWeightModel()
+        values = {model.predict(t, "2025-01-10", None).value for t in ("AAPL", "MSFT", "NVDA")}
+
+        assert values == {1.0}

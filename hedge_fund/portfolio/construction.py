@@ -33,6 +33,8 @@ def blend_signals(
     *,
     mode: PortfolioMode,
     investment_approaches: Mapping[str, InvestmentApproach],
+    max_name_weight: float | None = None,
+    volatilities: Mapping[str, float] | None = None,
 ) -> BlendResult:
     """Blend voting opinions, respecting each analyst's permission to short.
 
@@ -45,12 +47,23 @@ def blend_signals(
     Eligible scores are normalized to gross_target. Dollar-neutral strategies
     allocate half to each side, or target zero when either side is missing.
     This relative sizing does not calibrate conviction into expected returns.
+
+    With max_name_weight, no name exceeds that fraction of the sleeve: excess
+    goes to the side's other names in proportion to their scores, and what
+    the cap cannot place stays in cash. A dollar-neutral sleeve then shrinks
+    its larger side to match the smaller, so it stays neutral.
+
+    With volatilities (annualized, per ticker), sizing uses score / volatility
+    so each position carries similar risk; a name without one gets the median.
+    Eligible scores — the evidence — are unchanged.
     Invalid modes, profiles, weights, or signal values raise ValueError.
     """
     if mode not in ("long_only", "long_short", "dollar_neutral"):
         raise ValueError(f"unknown portfolio mode {mode!r}")
     if not isfinite(gross_target) or gross_target <= 0:
         raise ValueError("gross_target must be finite and positive")
+    if max_name_weight is not None and (not isfinite(max_name_weight) or max_name_weight <= 0):
+        raise ValueError("max_name_weight must be finite and positive")
     for name, weight in model_weights.items():
         if not isfinite(weight) or weight <= 0:
             raise ValueError(f"analyst {name!r}: blend weight must be finite and positive")
@@ -80,24 +93,72 @@ def blend_signals(
     convictions = {t: weighted_sum[t] / weight_total[t] if weight_total.get(t) else 0.0 for t in tickers}
     short_assessments = {t: short_sum[t] / weight_total[t] if weight_total.get(t) else 0.0 for t in tickers}
     scores = {t: max(convictions[t], 0.0) + (min(short_assessments[t], 0.0) if mode != "long_only" else 0.0) for t in tickers}
+    sizing = _risk_scaled(scores, volatilities) if volatilities is not None else scores
     weights = dict.fromkeys(tickers, 0.0)
     flat_reason: FlatReason | None = None
     if mode == "dollar_neutral":
-        longs = sum(max(score, 0.0) for score in scores.values())
-        shorts = sum(-min(score, 0.0) for score in scores.values())
+        longs = sum(max(score, 0.0) for score in sizing.values())
+        shorts = sum(-min(score, 0.0) for score in sizing.values())
         if longs < WEIGHT_TOLERANCE and shorts < WEIGHT_TOLERANCE:
             flat_reason = "no_eligible_positions"
         elif longs < WEIGHT_TOLERANCE:
             flat_reason = "missing_long_side"
         elif shorts < WEIGHT_TOLERANCE:
             flat_reason = "missing_short_side"
+        elif max_name_weight is None:
+            weights = {t: score / (longs if score > 0 else shorts) * (gross_target / 2) for t, score in sizing.items()}
         else:
-            weights = {t: score / (longs if score > 0 else shorts) * (gross_target / 2) for t, score in scores.items()}
+            long_side = _capped_allocation({t: s for t, s in sizing.items() if s > 0}, gross_target / 2, max_name_weight)
+            short_side = _capped_allocation({t: -s for t, s in sizing.items() if s < 0}, gross_target / 2, max_name_weight)
+            placed = min(sum(long_side.values()), sum(short_side.values()))
+            long_scale = placed / sum(long_side.values())
+            short_scale = placed / sum(short_side.values())
+            weights = dict.fromkeys(tickers, 0.0)
+            weights.update({t: w * long_scale for t, w in long_side.items()})
+            weights.update({t: -w * short_scale for t, w in short_side.items()})
     else:
-        gross = sum(abs(score) for score in scores.values())
+        gross = sum(abs(score) for score in sizing.values())
         if gross < WEIGHT_TOLERANCE:
             flat_reason = "no_eligible_positions"
+        elif max_name_weight is None:
+            weights = {t: score / gross * gross_target for t, score in sizing.items()}
         else:
-            weights = {t: score / gross * gross_target for t, score in scores.items()}
+            placed = _capped_allocation({t: abs(s) for t, s in sizing.items() if s != 0}, gross_target, max_name_weight)
+            weights = {t: placed.get(t, 0.0) * (1 if score > 0 else -1) for t, score in sizing.items()}
 
     return BlendResult(convictions=convictions, eligible_scores=scores, weights=weights, flat_reason=flat_reason)
+
+
+def _capped_allocation(scores: dict[str, float], budget: float, cap: float) -> dict[str, float]:
+    """Split `budget` across positive `scores` proportionally, no name above `cap`.
+
+    Water-filling: names whose share exceeds the cap are pinned at it and the
+    rest re-split what remains. Budget the caps cannot place is left unallocated.
+    """
+    allocation: dict[str, float] = {}
+    remaining = dict(scores)
+    left = budget
+    while remaining:
+        total = sum(remaining.values())
+        shares = {t: left * s / total for t, s in remaining.items()}
+        over = [t for t, share in shares.items() if share > cap]
+        if not over:
+            allocation.update(shares)
+            break
+        for t in over:
+            allocation[t] = cap
+            left -= cap
+            del remaining[t]
+    return allocation
+
+
+def _risk_scaled(scores: dict[str, float], volatilities: Mapping[str, float]) -> dict[str, float]:
+    """Divide each score by its volatility; names without a usable one get the median."""
+    usable = sorted(v for v in volatilities.values() if isfinite(v) and v > 0)
+    if not usable:
+        return dict(scores)
+    median = usable[len(usable) // 2] if len(usable) % 2 else (usable[len(usable) // 2 - 1] + usable[len(usable) // 2]) / 2
+    def vol(t: str) -> float:
+        v = volatilities.get(t)
+        return v if v is not None and isfinite(v) and v > 0 else median
+    return {t: s / vol(t) for t, s in scores.items()}

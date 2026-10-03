@@ -11,6 +11,7 @@ from hedge_fund.signals.burry import BurryAgent
 from hedge_fund.signals.damodaran import DamodaranAgent
 from hedge_fund.signals.dpx_macro import DPXMacroStabilityModel
 from hedge_fund.signals.druckenmiller import DruckenmillerAgent
+from hedge_fund.signals.equal_weight import EqualWeightModel
 from hedge_fund.signals.fisher import FisherAgent
 from hedge_fund.signals.graham import GrahamAgent
 from hedge_fund.signals.jhunjhunwala import JhunjhunwalaAgent
@@ -54,6 +55,8 @@ ALPHA_MODEL_REGISTRY: dict[str, type[AlphaModel]] = {
     "ta_board": TradingAgentsBoard,
     # Market-wide regime overlay (live-only; abstains on historical dates)
     "dpx_macro": DPXMacroStabilityModel,
+    # The yardstick: full long view on every name, same engine and costs
+    "equal_weight": EqualWeightModel,
 }
 
 
@@ -90,6 +93,7 @@ __all__ = [
     "BurryAgent",
     "AckmanAgent",
     "DPXMacroStabilityModel",
+    "EqualWeightModel",
     "DamodaranAgent",
     "FisherAgent",
     "PabraiAgent",
