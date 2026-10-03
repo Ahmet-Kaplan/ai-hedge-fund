@@ -539,3 +539,79 @@ def test_a_missing_sdk_names_the_install_command(monkeypatch, call):
 
     with pytest.raises(ImportError, match="pip install alpaca-py"):
         call(broker)
+
+
+# ---------------------------------------------------------------------------
+# A live run needs its own credential
+# ---------------------------------------------------------------------------
+
+class TestLiveKeysAreSeparate:
+    """`ALPACA_PAPER` must not be a flag that re-points one credential at real
+    money. Ported from PR #25, which made this structurally impossible rather
+    than merely gated."""
+
+    def _env(self, monkeypatch, **pairs):
+        for var in ("ALPACA_API_KEY", "APCA_API_KEY_ID", "ALPACA_SECRET_KEY",
+                    "APCA_API_SECRET_KEY", "ALPACA_PAPER",
+                    "ALPACA_LIVE_KEY_ID", "ALPACA_LIVE_API_KEY",
+                    "ALPACA_LIVE_SECRET_KEY", "ALPACA_LIVE_API_SECRET"):
+            monkeypatch.delenv(var, raising=False)
+        for name, value in pairs.items():
+            monkeypatch.setenv(name, value)
+
+    def test_a_paper_run_reads_the_paper_key(self, monkeypatch):
+        self._env(monkeypatch, ALPACA_API_KEY="PKPAPER1234567890ABCD",
+                  ALPACA_SECRET_KEY="s", ALPACA_PAPER="true")
+        settings = AlpacaSettings.from_env()
+        assert settings.paper is True and settings.venue == "alpaca-paper"
+
+    def test_a_live_run_refuses_without_its_own_keys(self, monkeypatch):
+        self._env(monkeypatch, ALPACA_API_KEY="PKPAPER1234567890ABCD",
+                  ALPACA_SECRET_KEY="s", ALPACA_PAPER="false")
+        with pytest.raises(ValueError, match="ALPACA_LIVE_KEY_ID is not set"):
+            AlpacaSettings.from_env()
+
+    def test_the_paper_key_is_refused_on_a_live_run(self, monkeypatch):
+        self._env(monkeypatch, ALPACA_API_KEY="PKPAPER1234567890ABCD",
+                  ALPACA_SECRET_KEY="s", ALPACA_PAPER="false",
+                  ALPACA_LIVE_KEY_ID="PKPAPER1234567890ABCD",
+                  ALPACA_LIVE_SECRET_KEY="s")
+        with pytest.raises(ValueError, match="is the paper key"):
+            AlpacaSettings.from_env()
+
+    def test_a_paper_shaped_key_is_refused_even_via_the_live_variables(self, monkeypatch):
+        """The mask matters as much as the mode: a PK key is a paper key."""
+        self._env(monkeypatch, ALPACA_PAPER="false",
+                  ALPACA_LIVE_KEY_ID="PKPAPER1234567890ABCD",
+                  ALPACA_LIVE_SECRET_KEY="s")
+        with pytest.raises(ValueError, match="looks like an Alpaca paper key"):
+            AlpacaSettings.from_env()
+
+    def test_its_own_live_key_is_accepted(self, monkeypatch):
+        self._env(monkeypatch, ALPACA_PAPER="false",
+                  ALPACA_LIVE_KEY_ID="AKLIVE1234567890ABCD",
+                  ALPACA_LIVE_SECRET_KEY="s")
+        settings = AlpacaSettings.from_env()
+        assert settings.paper is False and settings.venue == "alpaca-live"
+        assert settings.api_key == "AKLIVE1234567890ABCD"
+
+    def test_a_live_run_does_not_need_the_paper_key_at_all(self, monkeypatch):
+        self._env(monkeypatch, ALPACA_PAPER="false",
+                  ALPACA_LIVE_KEY_ID="AKLIVE1234567890ABCD",
+                  ALPACA_LIVE_SECRET_KEY="s")
+        assert AlpacaSettings.from_env().secret_key == "s"
+
+    def test_a_placeholder_is_not_mistaken_for_a_paper_key(self, monkeypatch):
+        """The mask check must not fire on short or unshaped values."""
+        self._env(monkeypatch, ALPACA_PAPER="false",
+                  ALPACA_LIVE_KEY_ID="well-tested-key", ALPACA_LIVE_SECRET_KEY="s")
+        assert AlpacaSettings.from_env().api_key == "well-tested-key"
+
+    def test_a_live_run_still_needs_both_gates_to_trade(self, monkeypatch):
+        """Separate keys are a third lock, not a replacement for the other two."""
+        self._env(monkeypatch, ALPACA_PAPER="false",
+                  ALPACA_LIVE_KEY_ID="AKLIVE1234567890ABCD",
+                  ALPACA_LIVE_SECRET_KEY="s")
+        settings = AlpacaSettings.from_env()
+        assert settings.refuse_reason() is not None            # trading not enabled
+        assert "ALPACA_TRADING_ENABLED" in settings.refuse_reason()

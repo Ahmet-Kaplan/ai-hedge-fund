@@ -20,6 +20,8 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "ledger"
 def _clear_alpaca_env(monkeypatch):
     for var in ("ALPACA_API_KEY", "ALPACA_SECRET_KEY", "ALPACA_API_SECRET",
                 "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "ALPACA_PAPER",
+                "ALPACA_LIVE_KEY_ID", "ALPACA_LIVE_API_KEY",
+                "ALPACA_LIVE_SECRET_KEY", "ALPACA_LIVE_API_SECRET",
                 "ALPACA_TRADING_ENABLED", "ALPACA_LIVE_TRADING_CONFIRMED"):
         monkeypatch.delenv(var, raising=False)
 
@@ -128,6 +130,9 @@ def test_a_live_account_says_so_in_plain_words(tmp_path, monkeypatch):
     _clear_alpaca_env(monkeypatch)
     monkeypatch.setenv("ALPACA_API_KEY", "k")
     monkeypatch.setenv("ALPACA_SECRET_KEY", "s")
+    # A live run needs its own credential, not the paper key.
+    monkeypatch.setenv("ALPACA_LIVE_KEY_ID", "live-k")
+    monkeypatch.setenv("ALPACA_LIVE_SECRET_KEY", "live-s")
     monkeypatch.setenv("ALPACA_PAPER", "false")
     monkeypatch.setenv("ALPACA_TRADING_ENABLED", "1")
     monkeypatch.setenv("ALPACA_LIVE_TRADING_CONFIRMED", "1")
@@ -145,6 +150,8 @@ def test_a_live_account_without_the_second_confirmation_stays_read_only(tmp_path
     _clear_alpaca_env(monkeypatch)
     monkeypatch.setenv("ALPACA_API_KEY", "k")
     monkeypatch.setenv("ALPACA_SECRET_KEY", "s")
+    monkeypatch.setenv("ALPACA_LIVE_KEY_ID", "live-k")
+    monkeypatch.setenv("ALPACA_LIVE_SECRET_KEY", "live-s")
     monkeypatch.setenv("ALPACA_PAPER", "false")
     monkeypatch.setenv("ALPACA_TRADING_ENABLED", "1")
     _fake_alpaca(monkeypatch)

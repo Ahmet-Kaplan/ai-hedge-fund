@@ -9,7 +9,10 @@ Safety is layered so a half-remembered environment variable cannot move real
 money:
 
 ``ALPACA_PAPER`` (default ``true``)
-    Selects Alpaca's paper endpoint. Reads always work.
+    Selects Alpaca's paper endpoint. Reads always work. A live run reads its
+    credential from ``ALPACA_LIVE_KEY_ID``/``ALPACA_LIVE_SECRET_KEY`` instead
+    and refuses the paper key, so this flag cannot re-point one credential at
+    real money.
 ``ALPACA_TRADING_ENABLED`` (default ``false``)
     ``place_order`` refuses until this is explicitly truthy, whatever the venue.
 ``ALPACA_LIVE_TRADING_CONFIRMED`` (default ``false``)
@@ -41,6 +44,11 @@ logger = logging.getLogger(__name__)
 # Alpaca's own SDK variables, then ours. ALPACA_API_SECRET is honored because
 # it is the name several existing local setups (and Alpaca's own docs) use.
 _API_KEY_VARS = ("ALPACA_API_KEY", "APCA_API_KEY_ID")
+# A live run must present its own credential, from its own variables. See
+# `from_env`: the point is that flipping ALPACA_PAPER cannot re-point a paper
+# key at real money, however the confirmation flag is set.
+_LIVE_KEY_VARS = ("ALPACA_LIVE_KEY_ID", "ALPACA_LIVE_API_KEY")
+_LIVE_SECRET_VARS = ("ALPACA_LIVE_SECRET_KEY", "ALPACA_LIVE_API_SECRET")
 _SECRET_KEY_VARS = ("ALPACA_SECRET_KEY", "ALPACA_API_SECRET", "APCA_API_SECRET_KEY")
 
 _TRUE = {"1", "true", "yes", "on"}
@@ -94,6 +102,17 @@ def _first_env(names: tuple[str, ...]) -> str | None:
     return None
 
 
+def _looks_like_a_paper_key(api_key: str) -> bool:
+    """Whether a key carries Alpaca's paper prefix.
+
+    Deliberately narrow — an Alpaca key id is long, upper-case and starts `PK`
+    for paper or `AK` for live. Anything shorter or unshaped is left alone, so
+    a test fixture or a placeholder is not mistaken for a real paper key.
+    """
+    key = api_key.strip()
+    return len(key) >= 20 and key.startswith("PK") and key[2:].isalnum() and key[2:].isupper()
+
+
 @dataclass(frozen=True)
 class AlpacaSettings:
     """Everything the adapter needs, resolved once and inspectable."""
@@ -116,18 +135,57 @@ class AlpacaSettings:
         """Build settings from the environment; *overrides* win.
 
         Raises ValueError naming the variable to set when a key is missing.
+
+        A live run reads its credential from the ``ALPACA_LIVE_*`` variables
+        only, and refuses the paper key outright. Without that, `ALPACA_PAPER`
+        is a flag that re-points one credential at real money, and the only
+        thing between a typo and a live order is the confirmation variable.
+        Separate keys make the mistake structurally impossible rather than
+        merely gated — ported from PR #25, which had this right.
+
+        Checking the MASK matters as much as the mode: a key that starts
+        ``PK`` is Alpaca's paper prefix, so it is refused on a live run even
+        when it arrives through the live variables.
         """
-        api_key = _first_env(_API_KEY_VARS)
-        secret_key = _first_env(_SECRET_KEY_VARS)
-        if not api_key:
-            raise ValueError(f"{_API_KEY_VARS[0]} is not set (accepted: {', '.join(_API_KEY_VARS)})")
-        if not secret_key:
-            raise ValueError(f"{_SECRET_KEY_VARS[0]} is not set (accepted: {', '.join(_SECRET_KEY_VARS)})")
+        paper = _parse_bool(os.environ.get("ALPACA_PAPER"), default=True)
+        if paper:
+            api_key = _first_env(_API_KEY_VARS)
+            secret_key = _first_env(_SECRET_KEY_VARS)
+            if not api_key:
+                raise ValueError(f"{_API_KEY_VARS[0]} is not set (accepted: {', '.join(_API_KEY_VARS)})")
+            if not secret_key:
+                raise ValueError(f"{_SECRET_KEY_VARS[0]} is not set (accepted: {', '.join(_SECRET_KEY_VARS)})")
+        else:
+            api_key = _first_env(_LIVE_KEY_VARS)
+            secret_key = _first_env(_LIVE_SECRET_VARS)
+            if not api_key:
+                raise ValueError(
+                    f"ALPACA_PAPER is false and {_LIVE_KEY_VARS[0]} is not set. A live run "
+                    f"needs its own live keys (accepted: {', '.join(_LIVE_KEY_VARS)}); the "
+                    f"paper key is not accepted for real money."
+                )
+            if not secret_key:
+                raise ValueError(
+                    f"{_LIVE_SECRET_VARS[0]} is not set (accepted: {', '.join(_LIVE_SECRET_VARS)})"
+                )
+
+            paper_key = _first_env(_API_KEY_VARS)
+            if paper_key and api_key == paper_key:
+                raise ValueError(
+                    f"{_LIVE_KEY_VARS[0]} is the paper key; a live account needs its own "
+                    f"live keys, so that ALPACA_PAPER cannot re-point one credential at "
+                    f"real money"
+                )
+            if _looks_like_a_paper_key(api_key):
+                raise ValueError(
+                    f"{_LIVE_KEY_VARS[0]} looks like an Alpaca paper key (its prefix is "
+                    f"PK); a live run needs live keys"
+                )
 
         settings = cls(
             api_key=api_key,
             secret_key=secret_key,
-            paper=_parse_bool(os.environ.get("ALPACA_PAPER"), default=True),
+            paper=paper,
             trading_enabled=_parse_bool(os.environ.get("ALPACA_TRADING_ENABLED"), default=False),
             live_confirmed=_parse_bool(os.environ.get("ALPACA_LIVE_TRADING_CONFIRMED"), default=False),
             allow_closed_market=_parse_bool(
