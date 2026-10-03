@@ -66,3 +66,97 @@ def test_requires_keys(monkeypatch):
     monkeypatch.delenv("APCA_API_SECRET_KEY", raising=False)
     with pytest.raises(ValueError, match="APCA_API_KEY_ID"):
         AlpacaPriceSource(session=FakeSession())
+
+
+class TickingClock:
+    """Advances on every read, so the pacing interval is always already met."""
+
+    def __init__(self) -> None:
+        self.t = 0.0
+
+    def __call__(self) -> float:
+        self.t += 1.0
+        return self.t
+
+
+class TestRateLimiting:
+    """The free tier rate-limits, and a backtest walks many tickers.
+
+    Found by running the free path end to end: a real backtest died on
+    `HTTP 429: too many requests`, because the SEC source retried and this one
+    did not.
+    """
+
+    def _source(self, responses, sleeps, clock=None):
+        """*clock* defaults to one that advances, so pacing adds no wait and the
+        sleeps observed are the backoff alone."""
+        return AlpacaPriceSource(
+            "k", "s", session=FakeSession(*responses),
+            clock=clock or TickingClock(), sleep=sleeps.append,
+        )
+
+    def test_a_429_is_retried_rather_than_ending_the_run(self):
+        sleeps: list[float] = []
+        source = self._source(
+            [FakeResponse(429, {"message": "too many requests"}),
+             FakeResponse(payload={"bars": {"AAPL": [bar("2026-09-28", 10.0)]}})],
+            sleeps,
+        )
+
+        out = source.fetch(["AAPL"], "2026-09-01", "2026-09-30")
+
+        assert [p.close for p in out["AAPL"]] == [10.0]
+        assert sleeps == [1.0]           # backed off before retrying
+
+    def test_a_5xx_is_retried_too(self):
+        sleeps: list[float] = []
+        source = self._source([FakeResponse(503, {}), FakeResponse(payload={"bars": {}})], sleeps)
+        assert source.fetch(["AAPL"], "2026-09-01", "2026-09-30") == {}
+        assert sleeps == [1.0]
+
+    def test_the_backoff_grows_then_gives_up(self):
+        sleeps: list[float] = []
+        source = self._source([FakeResponse(429, {"message": "slow down"})] * 4, sleeps)
+
+        with pytest.raises(DataSourceError, match="429"):
+            source.fetch(["AAPL"], "2026-09-01", "2026-09-30")
+
+        assert sleeps == [1.0, 2.0, 4.0]
+
+    def test_a_client_error_is_not_retried(self):
+        """401 or 404 will not fix itself, and retrying only delays the report."""
+        sleeps: list[float] = []
+        source = self._source([FakeResponse(401, {"message": "unauthorized"})], sleeps)
+
+        with pytest.raises(DataSourceError, match="401"):
+            source.fetch(["AAPL"], "2026-09-01", "2026-09-30")
+
+        assert sleeps == []
+
+    def test_requests_are_paced_so_the_limit_is_rarely_reached(self):
+        """The cheapest way to handle a rate limit is not to hit it."""
+        sleeps: list[float] = []
+        source = self._source(
+            [FakeResponse(payload={"bars": {}}), FakeResponse(payload={"bars": {}})],
+            sleeps, clock=lambda: 100.0,          # frozen: the second request is immediate
+        )
+
+        source.fetch(["AAPL"], "2026-09-01", "2026-09-30")   # no wait: nothing before it
+        source.fetch(["MSFT"], "2026-09-01", "2026-09-30")   # immediate → waits
+
+        assert sleeps == [pytest.approx(0.35)]
+
+    def test_a_retry_does_not_carry_a_stale_page_token_forward(self):
+        """The retry re-sends the same request; only a good page advances."""
+        sleeps: list[float] = []
+        session = FakeSession(
+            FakeResponse(429, {"message": "slow down"}),
+            FakeResponse(payload={"bars": {"AAPL": [bar("2026-09-28", 1.0)]}}),
+        )
+        source = AlpacaPriceSource("k", "s", session=session,
+                                   clock=TickingClock(), sleep=sleeps.append)
+
+        source.fetch(["AAPL"], "2026-09-01", "2026-09-30")
+
+        assert "page_token" not in session.calls[0]
+        assert "page_token" not in session.calls[1]
