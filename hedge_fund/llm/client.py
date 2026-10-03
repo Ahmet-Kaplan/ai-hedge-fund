@@ -16,7 +16,9 @@ import hashlib
 import json
 import math
 import os
+import queue
 import re
+import threading
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -109,24 +111,126 @@ class ChatLLM:
         messages = [("system", system), ("human", user)]
         try:
             if self._on_token is None:
-                return _flatten(self._chat.invoke(messages).content)
+                return _flatten(self._call(lambda: self._chat.invoke(messages)).content)
 
             # Streaming chunks concatenate into the response, so they flatten
             # without a separator — the "\n" that joins whole-message blocks would
             # land mid-word here.
-            parts: list[str] = []
-            for chunk in self._chat.stream(messages):
-                text = _flatten(chunk.content, sep="")
-                if text:
-                    parts.append(text)
-                    self._on_token(text)
-            return "".join(parts)
+            #
+            # `on_token` is invoked here, on the caller's thread, even though the
+            # chunks are produced on a worker: the TUI renders from those
+            # callbacks and moving them across threads would change its contract.
+            return self._stream(messages)
         except LLMCallError:
             raise
         except Exception as exc:
             raise _chat_call_error(
                 self.model, exc, unreachable_hint=self._unreachable_hint
             ) from None
+
+    # ------------------------------------------------------------------
+    # Deadlines
+    # ------------------------------------------------------------------
+    #
+    # A provider's own `timeout=` is not a guarantee. Google's client has been
+    # observed to ignore it on both gRPC and REST and sit in an SSL read for
+    # over thirty minutes, which for an unattended run means a cycle that never
+    # ends. A worker thread plus a bounded wait is the only mechanism that holds
+    # whatever the SDK does internally.
+    #
+    # `_is_timeout` already recognises a bare `TimeoutError`, so raising one
+    # here lands in the existing classification and the caller sees the same
+    # "LLM request timed out" message as a provider-level timeout.
+
+    def _deadline_seconds(self) -> float | None:
+        """How long to wait for one call, or None to trust the provider.
+
+        Twice the request timeout plus a margin: the SDK may legitimately retry
+        once, so a deadline equal to `timeout` would abort work the provider was
+        still making progress on.
+        """
+        if self._timeout is None or self._timeout <= 0:
+            return None
+        return self._timeout * 2 + 30
+
+    def _call(self, call: Callable[[], object]) -> object:
+        """Run *call* on a worker, giving up when the deadline passes."""
+        deadline = self._deadline_seconds()
+        if deadline is None:
+            return call()
+        box: dict[str, object] = {}
+
+        def run() -> None:
+            try:
+                box["value"] = call()
+            except BaseException as exc:  # re-raised on the caller's thread
+                box["error"] = exc
+
+        worker = threading.Thread(target=run, daemon=True, name=f"llm-{self.model}")
+        worker.start()
+        worker.join(deadline)
+        if worker.is_alive():
+            # The worker cannot be killed, so it is left to finish and be
+            # collected; daemon=True keeps it from holding up interpreter exit.
+            raise TimeoutError(f"no answer from model {self.model} within {deadline:g}s")
+        if "error" in box:
+            raise box["error"]  # type: ignore[misc]
+        return box["value"]
+
+    def _stream(self, messages: list) -> str:
+        """`_call` for the streaming path, with `on_token` on this thread."""
+        deadline = self._deadline_seconds()
+        if deadline is None:
+            return self._drain(self._chat.stream(messages))
+
+        chunks: queue.Queue = queue.Queue()
+
+        def produce() -> None:
+            try:
+                for chunk in self._chat.stream(messages):
+                    chunks.put(("chunk", chunk))
+            except BaseException as exc:
+                chunks.put(("error", exc))
+            finally:
+                chunks.put(("end", None))
+
+        worker = threading.Thread(target=produce, daemon=True, name=f"llm-{self.model}")
+        worker.start()
+
+        parts: list[str] = []
+        expires = time.monotonic() + deadline
+        while True:
+            remaining = expires - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"no answer from model {self.model} within {deadline:g}s"
+                )
+            try:
+                kind, payload = chunks.get(timeout=remaining)
+            except queue.Empty:
+                raise TimeoutError(
+                    f"no answer from model {self.model} within {deadline:g}s"
+                ) from None
+            if kind == "chunk":
+                text = _flatten(payload.content, sep="")
+                if text:
+                    parts.append(text)
+                    self._on_token(text)
+            elif kind == "error":
+                raise payload
+            else:
+                return "".join(parts)
+
+    def _drain(self, stream) -> str:
+        """The no-deadline streaming path: chunks as they arrive, and the
+        listener still fires for every piece."""
+        parts: list[str] = []
+        for chunk in stream:
+            text = _flatten(chunk.content, sep="")
+            if text:
+                parts.append(text)
+                self._on_token(text)
+        return "".join(parts)
 
 
 class JevLLM:

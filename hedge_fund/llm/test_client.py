@@ -8,6 +8,8 @@ call the API.
 
 from __future__ import annotations
 
+import threading
+
 import json
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
@@ -874,3 +876,128 @@ def test_ordinary_call_error_without_diagnostics_preserves_failure_shape(tmp_pat
     signal = agent.predict("TEST", "2025-01-15", MockDataClient(metrics=_history()))
     assert signal.metadata == {"abstained": True, "abstain_reason": "LLM call failed: failed", "cached": False}
     assert not list(tmp_path.glob("*.json"))
+
+
+# ---------------------------------------------------------------------------
+# Hard deadlines
+# ---------------------------------------------------------------------------
+
+class HangingChat:
+    """A provider that accepts the request and then never answers.
+
+    The failure this models is real: a client that ignores its own `timeout=`
+    and sits in an SSL read indefinitely, which for an unattended cycle means a
+    run that never ends.
+    """
+
+    def __init__(self, pieces=("late",)):
+        self.release = threading.Event()
+        self._pieces = pieces
+        self.invoked = False
+        self.streamed = False
+
+    def invoke(self, messages):
+        self.invoked = True
+        self.release.wait(30)          # bounded so a bug cannot hang the suite
+        return FakeChunk("too late")
+
+    def stream(self, messages):
+        self.streamed = True
+        self.release.wait(30)
+        yield FakeChunk("too late")
+
+
+class TestHardDeadline:
+    """A provider's own timeout is not a guarantee, so the client enforces one."""
+
+    def test_the_deadline_allows_for_one_retry(self):
+        """Twice the request timeout plus a margin: a deadline equal to the
+        timeout would abort work the provider was still making progress on."""
+        assert ChatLLM("m", FakeChat([]), timeout=10)._deadline_seconds() == 50
+        assert ChatLLM("m", FakeChat([]), timeout=0.5)._deadline_seconds() == 31
+
+    def test_no_timeout_means_no_deadline(self):
+        """Nothing configured, nothing invented: the provider is trusted."""
+        assert ChatLLM("m", FakeChat([]))._deadline_seconds() is None
+        assert ChatLLM("m", FakeChat([]), timeout=0)._deadline_seconds() is None
+
+    def test_a_hanging_call_times_out_instead_of_waiting_forever(self, monkeypatch):
+        monkeypatch.setattr(ChatLLM, "_deadline_seconds", lambda self: 0.05)
+        chat = HangingChat()
+
+        with pytest.raises(LLMCallError, match="timed out"):
+            ChatLLM("m", chat, timeout=1).complete("s", "u")
+        assert chat.invoked
+
+    def test_a_hanging_stream_times_out_too(self, monkeypatch):
+        monkeypatch.setattr(ChatLLM, "_deadline_seconds", lambda self: 0.05)
+        chat = HangingChat()
+
+        with pytest.raises(LLMCallError, match="timed out"):
+            ChatLLM("m", chat, lambda _: None, timeout=1).complete("s", "u")
+        assert chat.streamed
+
+    def test_the_timeout_is_reported_like_any_other_timeout(self, monkeypatch):
+        """`_is_timeout` recognises a bare TimeoutError, so this reuses the
+        existing classification rather than inventing a new failure mode."""
+        monkeypatch.setattr(ChatLLM, "_deadline_seconds", lambda self: 0.05)
+        with pytest.raises(LLMCallError) as caught:
+            ChatLLM("m", HangingChat(), timeout=1).complete("s", "u")
+        assert "timed out" in str(caught.value)
+        assert "m" in str(caught.value)          # names the model
+
+    def test_a_prompt_call_is_untouched(self):
+        """The deadline must not change an answer that arrives in time."""
+        chat = FakeChat([FakeChunk("done")])
+        assert ChatLLM("m", chat, timeout=5).complete("s", "u") == "done"
+
+    def test_the_listener_stays_on_the_callers_thread(self, monkeypatch):
+        """The TUI renders from those callbacks, so the deadline path must not
+        move them onto the worker that produces the chunks."""
+        monkeypatch.setattr(ChatLLM, "_deadline_seconds", lambda self: 5)
+        chat = FakeChat([FakeChunk("a"), FakeChunk("b")])
+        threads: list[str] = []
+        caller = threading.current_thread().name
+
+        ChatLLM("m", chat, lambda _: threads.append(threading.current_thread().name),
+                timeout=1).complete("s", "u")
+
+        assert threads and set(threads) == {caller}
+
+    def test_a_streamed_answer_is_still_whole(self, monkeypatch):
+        monkeypatch.setattr(ChatLLM, "_deadline_seconds", lambda self: 5)
+        chat = FakeChat([FakeChunk('{"sig'), FakeChunk('nal": '), FakeChunk('"buy"}')])
+        seen: list[str] = []
+
+        result = ChatLLM("m", chat, seen.append, timeout=1).complete("s", "u")
+
+        assert result == '{"signal": "buy"}'
+        assert seen == ['{"sig', 'nal": ', '"buy"}']
+
+    def test_an_error_raised_on_the_worker_reaches_the_caller(self, monkeypatch):
+        """A real failure must surface, not be swallowed into an empty answer.
+
+        The message is deliberately generic — `_chat_call_error` does not put
+        provider internals in front of a user — so what is asserted is that the
+        failure arrives at all, and names the model.
+        """
+        monkeypatch.setattr(ChatLLM, "_deadline_seconds", lambda self: 5)
+
+        class Exploding:
+            def invoke(self, messages):
+                raise RuntimeError("provider exploded")
+
+        with pytest.raises(LLMCallError, match="model m"):
+            ChatLLM("m", Exploding(), timeout=1).complete("s", "u")
+
+    def test_a_worker_error_is_not_mistaken_for_a_timeout(self, monkeypatch):
+        monkeypatch.setattr(ChatLLM, "_deadline_seconds", lambda self: 5)
+
+        class Exploding:
+            def stream(self, messages):
+                raise ValueError("bad request")
+                yield  # pragma: no cover - makes this a generator
+
+        with pytest.raises(LLMCallError) as caught:
+            ChatLLM("m", Exploding(), lambda _: None, timeout=1).complete("s", "u")
+        assert "timed out" not in str(caught.value)
