@@ -9,13 +9,43 @@ from __future__ import annotations
 
 import base64
 import json
+import shutil
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from hedge_fund.web import auth
+from hedge_fund import paths
+from hedge_fund.web import app as app_module, auth
 from hedge_fund.web.app import app, runs
 from hedge_fund.web.charts import nav_chart
+
+
+@pytest.fixture(autouse=True)
+def isolated_home(tmp_path: Path, monkeypatch) -> Path:
+    """Point the dashboard at a throwaway home instead of ~/.hedge-fund.
+
+    Without this the suite reads whatever the developer's machine happens to
+    contain: the mandate tests passed here only because the CLI had been run
+    once and seeded example.yaml, and failed the first time CI ran them on a
+    clean runner. A test that depends on the history of the box it runs on
+    is not testing the code.
+
+    It also keeps the dashboard's routes away from real paper ledgers, which
+    these tests have no business reading and must never write.
+    """
+    mandates, paper, research = (tmp_path / name for name in ("mandates", "paper", "research"))
+    for directory in (mandates, paper, research):
+        directory.mkdir()
+    shutil.copyfile(paths.EXAMPLE_MANDATE, mandates / "example.yaml")
+
+    # Two bindings, because the route resolves paths against the name it
+    # imported while ensure_mandates_dir() reads the one in paths.
+    monkeypatch.setattr(paths, "MANDATES_DIR", mandates)
+    monkeypatch.setattr(app_module, "MANDATES_DIR", mandates)
+    monkeypatch.setattr(app_module, "PAPER_DIR", paper)
+    monkeypatch.setattr(runs, "research_dir", research)
+    return tmp_path
 
 
 @pytest.fixture
