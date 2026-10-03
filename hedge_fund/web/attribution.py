@@ -31,7 +31,8 @@ from math import copysign, fsum, inf, isfinite, sqrt
 
 from hedge_fund.backtesting.fund import FundBacktestResult
 from hedge_fund.brokers.models import Fill
-from hedge_fund.pipeline.models import CycleRecord
+from hedge_fund.pipeline.models import CycleRecord, StrategyRecord
+from hedge_fund.pipeline.session import SessionRecord
 
 # An analyst who abstains on every name still appears, with zero calls. That
 # is the single most useful row on the page when the data feed is thin, so
@@ -191,7 +192,18 @@ class AnalystScore:
 
 
 def calls_from_result(result: FundBacktestResult) -> list[Call]:
-    """Every analyst view in *result*, priced against the following rebalance.
+    """Every analyst view in a simulation. See `calls_from_records`."""
+    return calls_from_records(result.records)
+
+
+def calls_from_records(records: list[SessionRecord]) -> list[Call]:
+    """Every analyst view in *records*, priced against the following rebalance.
+
+    Takes session records rather than a backtest result because a paper
+    fund's ledger is a list of exactly the same records — paper trading is
+    the backtest one tick at a time. Reading them through one function is
+    what lets attribution report on the fund that is actually running, not
+    only on simulations somebody happened to launch from the browser.
 
     Prices come from the *assessment* marks, not the cycle's own `marks`.
     That distinction is the difference between scoring every call and
@@ -202,65 +214,102 @@ def calls_from_result(result: FundBacktestResult) -> list[Call]:
     series is the only one that can score the opinion.
 
     Both ends of a return therefore come from the same source, one rebalance
-    apart. The last rebalance is priced against the trailing assessment the
-    backtest makes at the final session and never executes. When no later
-    price exists the call is kept unscored rather than dropped, because an
-    unmeasurable opinion is still a thing the analyst said.
+    apart. When no later price exists the call is kept unscored rather than
+    dropped, because an unmeasurable opinion is still a thing the analyst
+    said.
     """
-    cycles = result.cycles
-    if not cycles:
-        return []
-
-    weights_by_strategy = {
-        strategy.name: strategy.model_weights for strategy in result.records[0].executed.spec.strategies
-    } if result.records and result.records[0].executed else {}
-
-    snapshots = _mark_snapshots(result)
+    cycles = [r.executed for r in records if r.executed is not None]
+    snapshots = _mark_snapshots(records)
+    # A cycle carries its own audit copy of the spec, so a mandate edited
+    # mid-flight cannot retro-reweight earlier attribution. The first one is
+    # the fallback for a record whose copy predates per-strategy weights.
+    fallback = {s.name: s.model_weights for s in cycles[0].spec.strategies} if cycles else {}
 
     calls: list[Call] = []
     for cycle in cycles:
         now = _view_date(cycle)
-        entry = _entry_marks(cycle, snapshots, now)
-        later = _next_marks(snapshots, now)
-        # A cycle carries its own audit copy of the spec, so a mandate edited
-        # mid-flight cannot retro-reweight earlier attribution.
-        spec_weights = {s.name: s.model_weights for s in cycle.spec.strategies} or weights_by_strategy
-        # build_orders emits at most one order per name, so at most one fill.
-        fills = {fill.ticker: fill for fill in cycle.fills}
+        calls.extend(_calls_from_views(
+            fund=cycle.fund,
+            as_of=cycle.as_of,
+            strategies=cycle.strategies,
+            spec_weights={s.name: s.model_weights for s in cycle.spec.strategies} or fallback,
+            nav=cycle.nav,
+            entry=snapshots.get(now) or cycle.marks,
+            later=_next_marks(snapshots, now),
+            # build_orders emits at most one order per name, so at most one fill.
+            fills={fill.ticker: fill for fill in cycle.fills},
+        ))
 
-        for strategy in cycle.strategies:
-            model_weights = spec_weights.get(strategy.name, {})
-            numerators = _numerators(strategy.signals, model_weights)
+    # An assessment that no cycle covers was never executed: a live fund's
+    # newest decision, waiting for tomorrow's close, and the trailing one a
+    # backtest makes at its final session. The analysts said it either way,
+    # so it is recorded here and simply goes unscored until a later close
+    # exists to judge it against. Without this a deployed fund contributes
+    # nothing to the page until its next tick, and the leaderboard lags the
+    # mandate it is supposed to describe by a full rebalance.
+    executed = {cycle.as_of for cycle in cycles}
+    for record in records:
+        decision = record.decision
+        if decision is None or decision.as_of in executed:
+            continue
+        calls.extend(_calls_from_views(
+            fund=decision.fund,
+            as_of=decision.as_of,
+            strategies=decision.strategies,
+            spec_weights={s.name: s.model_weights for s in decision.spec.strategies},
+            nav=record.nav,
+            entry=snapshots.get(decision.as_of) or decision.marks,
+            later=_next_marks(snapshots, decision.as_of),
+            fills={},
+        ))
+    return calls
 
-            for signal in strategy.signals:
-                abstained = signal.metadata.get("abstained") is True
-                weight = model_weights.get(signal.model_name, 1.0)
-                total = numerators.get(signal.ticker, 0.0)
-                share = 0.0
-                if not abstained and abs(total) > EPSILON:
-                    share = (weight * signal.value) / total
 
-                equity_fraction = strategy.final_contribution.get(signal.ticker, 0.0)
-                dollars = share * equity_fraction * cycle.nav
-                price = entry.get(signal.ticker)
-                exit_price = later.get(signal.ticker)
+def _calls_from_views(
+    *,
+    fund: str,
+    as_of: str,
+    strategies: list[StrategyRecord],
+    spec_weights: dict[str, dict[str, float]],
+    nav: float,
+    entry: dict[str, float],
+    later: dict[str, float],
+    fills: dict[str, Fill],
+) -> list[Call]:
+    """One assessment's signals, turned into calls."""
+    calls: list[Call] = []
+    for strategy in strategies:
+        model_weights = spec_weights.get(strategy.name, {})
+        numerators = _numerators(strategy.signals, model_weights)
 
-                calls.append(Call(
-                    fund=result.fund,
-                    date=cycle.as_of,
-                    analyst=signal.model_name,
-                    strategy=strategy.name,
-                    ticker=signal.ticker,
-                    conviction=signal.value,
-                    reasoning=signal.reasoning,
-                    abstained=abstained,
-                    price=price,
-                    exit_price=exit_price,
-                    forward_return=_forward_return(price, exit_price),
-                    share=share,
-                    dollars=dollars,
-                    fill=fills.get(signal.ticker),
-                ))
+        for signal in strategy.signals:
+            abstained = signal.metadata.get("abstained") is True
+            weight = model_weights.get(signal.model_name, 1.0)
+            total = numerators.get(signal.ticker, 0.0)
+            share = 0.0
+            if not abstained and abs(total) > EPSILON:
+                share = (weight * signal.value) / total
+
+            equity_fraction = strategy.final_contribution.get(signal.ticker, 0.0)
+            price = entry.get(signal.ticker)
+            exit_price = later.get(signal.ticker)
+
+            calls.append(Call(
+                fund=fund,
+                date=as_of,
+                analyst=signal.model_name,
+                strategy=strategy.name,
+                ticker=signal.ticker,
+                conviction=signal.value,
+                reasoning=signal.reasoning,
+                abstained=abstained,
+                price=price,
+                exit_price=exit_price,
+                forward_return=_forward_return(price, exit_price),
+                share=share,
+                dollars=share * equity_fraction * nav,
+                fill=fills.get(signal.ticker),
+            ))
     return calls
 
 
@@ -370,22 +419,23 @@ def _numerators(signals, model_weights) -> dict[str, float]:
     return totals
 
 
-def _mark_snapshots(result: FundBacktestResult) -> dict[str, dict[str, float]]:
+def _mark_snapshots(records: list[SessionRecord]) -> dict[str, dict[str, float]]:
     """Universe-wide closes by assessment date, oldest first.
 
-    Every assessment in the backtest contributes one snapshot, including the
-    trailing one the final session makes and never executes — that last
-    snapshot is what gives the final rebalance something to be scored
-    against.
+    Every assessment contributes one snapshot, including the trailing one a
+    final session makes and never executes — that last snapshot is what
+    gives the preceding rebalance something to be scored against.
     """
     snapshots: dict[str, dict[str, float]] = {}
-    for record in result.records:
+    for record in records:
         if record.decision is not None and record.decision.marks:
             snapshots[record.decision.as_of] = record.decision.marks
     # Executions may re-assess on a cutoff date that is not itself a session,
     # so those views are priced on a day no SessionRecord covers.
-    for cycle in result.cycles:
-        for assessment in (cycle.refreshed_assessment, cycle.original_assessment):
+    for record in records:
+        if record.executed is None:
+            continue
+        for assessment in (record.executed.refreshed_assessment, record.executed.original_assessment):
             if assessment is not None and assessment.marks:
                 snapshots.setdefault(assessment.as_of, assessment.marks)
     return dict(sorted(snapshots.items()))
@@ -400,12 +450,6 @@ def _view_date(cycle: CycleRecord) -> str:
     """
     refreshed = cycle.refreshed_assessment
     return refreshed.as_of if refreshed is not None else cycle.as_of
-
-
-def _entry_marks(
-    cycle: CycleRecord, snapshots: dict[str, dict[str, float]], now: str,
-) -> dict[str, float]:
-    return snapshots.get(now) or cycle.marks
 
 
 def _next_marks(snapshots: dict[str, dict[str, float]], after: str) -> dict[str, float]:

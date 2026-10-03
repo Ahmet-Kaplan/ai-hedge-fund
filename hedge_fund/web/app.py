@@ -24,6 +24,7 @@ from hedge_fund.paper.deployed import list_deployed, load_deployed
 from hedge_fund.paper.ledger import Ledger, LedgerError
 from hedge_fund.paths import ensure_mandates_dir, MANDATES_DIR, PAPER_DIR
 from hedge_fund.signals import ALPHA_MODEL_REGISTRY
+from hedge_fund.signals.roster import load_roster
 from hedge_fund.web import attribution, recommend
 from hedge_fund.web.auth import NotAuthenticated, principal_from_headers
 from hedge_fund.web.charts import nav_chart
@@ -178,6 +179,10 @@ async def analysts(request: Request) -> HTMLResponse:
         "window_weeks": attribution.WINDOW_WEEKS,
         "sources": sources,
         "roster": sorted(ALPHA_MODEL_REGISTRY),
+        # An empty roster is a data-feed limit, not a bug, and saying nothing
+        # about it is what makes people go looking for a page that was never
+        # going to appear.
+        "congress": bool(load_roster()),
     })
 
 
@@ -277,21 +282,41 @@ def _mandates() -> list[str]:
 
 
 def _all_calls() -> tuple[list[attribution.Call], int]:
-    """Every analyst call across the stored results, and how many files fed it.
+    """Every analyst call the box knows about, and how many sources fed it.
 
-    A result file written by an older schema, or truncated by a crash mid
-    write, must not take the page down — the rest of the corpus is still
-    worth reading, so a bad file is logged and skipped.
+    Two sources, deliberately, because they answer different questions and
+    the page needs both. A deployed fund's ledger is what the analysts are
+    saying about the mandate that is actually running; the stored backtests
+    are the depth behind it, since a weekly fund takes months to accumulate
+    enough rebalances to rank anyone. Reading only the simulations — which
+    is what this did — meant the leaderboard described whatever universe
+    somebody last typed into the run form, and no amount of editing the
+    live mandate could ever change it.
 
-    Files arrive newest first, which is what lets the deduplication keep the
-    most recent replay of any rebalance that two overlapping windows share.
+    Ledgers go first so the fund of record wins the deduplication: when a
+    backtest replays a session the live fund also traded, the ledger's copy
+    is the one that happened.
 
-    Only the trailing window is returned; a file whose every rebalance falls
-    outside it still counts as a source, because it was read and found to
-    have nothing current to say.
+    A source written by an older schema, or truncated by a crash mid write,
+    must not take the page down — the rest of the corpus is still worth
+    reading, so a bad one is logged and skipped.
+
+    Only the trailing window is returned; a source whose every rebalance
+    falls outside it still counts, because it was read and found to have
+    nothing current to say.
     """
     calls: list[attribution.Call] = []
     sources = 0
+    for directory in list_deployed(PAPER_DIR):
+        try:
+            records = Ledger(directory).records()
+        except LedgerError as exc:
+            log.warning("skipping unreadable ledger at %s: %s", directory, exc)
+            continue
+        calls.extend(attribution.calls_from_records(records))
+        sources += 1
+    # Newest first, which is what lets the deduplication keep the most recent
+    # replay of any rebalance that two overlapping windows share.
     for path in runs.result_files():
         try:
             result = FundBacktestResult.model_validate_json(path.read_text())

@@ -23,10 +23,10 @@ from hedge_fund.risk.limits import RiskLimits
 from hedge_fund.web import attribution
 
 
-def spec(*models: tuple[str, float]) -> FundSpec:
+def spec(*models: tuple[str, float], name: str = "test-fund") -> FundSpec:
     return FundSpec(
         schema_version=2,
-        name="test-fund",
+        name=name,
         strategies=[StrategySpec(
             name="pod",
             models=[ModelSpec(name=n, weight=w) for n, w in models],
@@ -49,7 +49,7 @@ def assessment(as_of: str, marks: dict, fund_spec: FundSpec,
                contribution: dict | None = None) -> DecisionRecord:
     """An assessment, which is where universe-wide prices actually live."""
     return DecisionRecord(
-        fund="test-fund", as_of=as_of, spec=fund_spec, universe=sorted(marks),
+        fund=fund_spec.name, as_of=as_of, spec=fund_spec, universe=sorted(marks),
         marks=marks, skipped=[], target_weights={}, clamps=[], final_weights={},
         strategies=[StrategyRecord(
             name="pod", slice=1.0, signals=signals or [], convictions={}, weights={},
@@ -68,7 +68,7 @@ def cycle(as_of: str, marks: dict, signals: list[Signal], contribution: dict,
     """
     decided = assessment(as_of, marks, fund_spec, signals, contribution)
     return CycleRecord(
-        fund="test-fund", as_of=as_of, spec=fund_spec, universe=sorted(marks),
+        fund=fund_spec.name, as_of=as_of, spec=fund_spec, universe=sorted(marks),
         marks={}, skipped=[], target_weights={}, clamps=[], final_weights={},
         equity_before=nav, cash_before=nav, orders=[], fills=[], positions={},
         cash=0.0, nav=nav,
@@ -197,6 +197,60 @@ def test_an_abstainer_earns_no_dollars() -> None:
     assert buffett.edge is None
 
 
+# ---- a live fund's own ledger is a source, not just backtests ---------------
+
+def test_a_ledger_is_read_directly_without_a_backtest_wrapper() -> None:
+    """Paper trading is the backtest one tick at a time, so the same records
+    must score the same way whichever container wrote them. Reading only
+    simulations is what let the page describe a universe the deployed fund
+    had not used in months."""
+    fund_spec = spec(("graham", 1.0))
+    first = cycle("2026-01-05", {"AAPL": 100.0}, [signal("graham", "AAPL", 0.5)],
+                  {"AAPL": 0.4}, fund_spec)
+    ledger = [
+        session("2026-01-05", {"AAPL": 100.0}, first),
+        session("2026-01-12", {"AAPL": 110.0}, cycle("2026-01-12", {"AAPL": 110.0}, [], {}, fund_spec)),
+    ]
+
+    assert attribution.calls_from_records(ledger) == attribution.calls_from_result(result_of(*ledger))
+
+
+def test_a_decision_awaiting_execution_is_already_a_call() -> None:
+    """A fund that rebalances weekly assesses today and trades tomorrow. If
+    only executed cycles counted, the newest views would be invisible for a
+    full rebalance and a freshly deployed fund would contribute nothing at
+    all — which is how the leaderboard came to lag the mandate."""
+    fund_spec = spec(("graham", 1.0))
+    pending = assessment("2026-01-05", {"KSS": 20.0}, fund_spec,
+                         [signal("graham", "KSS", 0.7)], {"KSS": 0.25})
+
+    calls = attribution.calls_from_records([session("2026-01-05", {}, None, pending)])
+
+    assert [c.ticker for c in calls] == ["KSS"]
+    assert calls[0].conviction == 0.7 and calls[0].price == 20.0
+    # Nothing has happened to it yet, so it is recorded and left unscored
+    # rather than credited with a return it has not earned.
+    assert calls[0].forward_return is None and calls[0].edge is None
+    assert calls[0].fill is None
+
+
+def test_an_executed_decision_is_not_counted_twice() -> None:
+    """The assessment at T rides on T's record and again inside T+1's cycle.
+    Scoring both would double every analyst's evidence."""
+    fund_spec = spec(("graham", 1.0))
+    decided = assessment("2026-01-05", {"AAPL": 100.0}, fund_spec,
+                         [signal("graham", "AAPL", 0.5)], {"AAPL": 0.4})
+    executed = cycle("2026-01-05", {"AAPL": 100.0}, [signal("graham", "AAPL", 0.5)],
+                     {"AAPL": 0.4}, fund_spec)
+
+    calls = attribution.calls_from_records([
+        session("2026-01-05", {}, None, decided),
+        session("2026-01-06", {"AAPL": 100.0}, executed),
+    ])
+
+    assert len([c for c in calls if c.date == "2026-01-05"]) == 1
+
+
 # ---- scoring ---------------------------------------------------------------
 
 def test_edge_rewards_conviction_in_the_right_direction() -> None:
@@ -311,9 +365,9 @@ def test_two_mandates_making_the_same_call_both_count() -> None:
     Two different mandates reaching the same conclusion is corroboration,
     not duplication, and collapsing them would discard real evidence.
     """
-    fund_spec = spec(("graham", 1.0))
     calls = []
     for name in ("fund-a", "fund-b"):
+        fund_spec = spec(("graham", 1.0), name=name)
         only = cycle("2026-01-05", {"AAPL": 100.0}, [signal("graham", "AAPL", 1.0)],
                      {"AAPL": 1.0}, fund_spec)
         result = result_of(

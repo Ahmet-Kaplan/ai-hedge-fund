@@ -107,6 +107,17 @@
 </div>
 {% endif %}
 
+{% if not congress %}
+<div class="notice" style="margin-top:18px">
+  <strong>No congressional analysts are registered.</strong> Following a
+  member of Congress needs their filing history, and the disclosure feed on
+  this plan serves only the most recent 25 filings per chamber — a few days,
+  against a 90-day signal window. Registering members from that would rank
+  whoever filed this week, not whoever trades well. Refresh the roster with
+  <code>aihf congress roster</code> once the feed allows paging.
+</div>
+{% endif %}
+
 <h2>How to read this</h2>
 <div class="notice">
   <p style="margin:0 0 10px"><strong>Avg edge</strong> is conviction × the
