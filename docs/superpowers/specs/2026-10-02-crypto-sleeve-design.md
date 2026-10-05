@@ -214,3 +214,31 @@ Verdict: neither passes (both trail weekly on total return and on first-half
 Sharpe). Bands halve fees but rebalance later after big moves; net, the
 method changes five-year results by a few percent at most. The crypto core
 keeps weekly rebalancing.
+
+## 13. trader.dev candidates (pre-registered 2026-10-05, before testing)
+
+Shortlisted from the trader.dev public library (BTC/ETH/SOL, daily, ≥20
+trades). Rejected: "RSI2 Dip Regime – WINNER" (38/38 wins, no losses — an
+overfitting signature), the K1–K5 kernel and Ichimoku families (a dozen
+near-identical variants from one author, several with identical results),
+"SMA100 Long-Only" (= our `ma100`), "QP0118 TSMOM 365d" (the code is a 90-day
+rule ≈ our `mom12w`), "CumRSI (wide sweep)" (parameter-swept). Read from
+their Pine source, transcribed with published parameters:
+
+- `td1` — **A2 Price Action Breakout, lookback 20** (trader.dev strategy
+  01M1MNSJ10XAQ1DPB4GKSF218W). Path-dependent structure level: start long
+  with level = lowest low of the prior 20 bars; while long, level =
+  max(level, prior-20-bar lowest low) and exit when close < level (then level
+  = prior-20-bar highest high); while out, level = min(level, prior-20-bar
+  highest high) and re-enter when close > level. Exposure 1 long, 0 out.
+  Uses daily highs and lows.
+- `td2` — **S1 TSMOM vote vol-target** (01M3AP0EE2M77MXGH47K0QX6TK). Votes
+  sign(close/close[20]−1), sign(close/close[60]−1), sign(close/close[120]−1);
+  long if ≥ 2 of 3 are up. Size = min(1, 0.5 / realized vol), realized vol =
+  population stdev of the last 30 daily log returns × √365, fixed at entry
+  and held until exit. **Adapted long-only:** their short side becomes cash
+  (spot account, no shorting).
+
+Both run per coin inside the 60/30/10 sleeve with the §3 execution (weekday
+trading, decision from the previous close), 25 bps per side, and the §3 bar.
+Their published results used 0.05% fees on Bybit perpetuals and BTC only.
