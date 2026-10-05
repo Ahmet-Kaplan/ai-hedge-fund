@@ -37,8 +37,11 @@ class CryptoBacktest(BaseModel):
 
 def run_backtest(
     closes: dict[str, dict[str, float]], weights: dict[str, float], rule: Rule | None, *,
-    fee_bps: float, start: str, end: str, capital: float = 10_000.0,
+    fee_bps: float, start: str, end: str, capital: float = 10_000.0, band: float | None = None,
 ) -> CryptoBacktest:
+    """With `band`, there is no Monday rebalance: each weekday the basket is
+    rebalanced only if some coin's weight is more than `band` away from its
+    target, relative to that target (spec §12)."""
     symbols = sorted(weights)
     all_days = sorted(set.intersection(*(set(closes[s]) for s in symbols)))
     days = [d for d in all_days if start <= d <= end]
@@ -55,7 +58,13 @@ def run_backtest(
         i = index[day]
         if date.fromisoformat(day).weekday() < 5:          # weekdays only, like the live run
             exposure = {s: (1 if rule is None else (rule(history[s][:i]) if i > 0 else 0)) for s in symbols}
-            if held_exposure is None or exposure != held_exposure or date.fromisoformat(day).weekday() == 0:
+            if band is not None:
+                value_now = cash + sum(units[s] * history[s][i] for s in symbols)
+                due = held_exposure is None or any(
+                    abs(units[s] * history[s][i] / value_now / weights[s] - 1) > band for s in symbols)
+            else:
+                due = held_exposure is None or exposure != held_exposure or date.fromisoformat(day).weekday() == 0
+            if due:
                 value = cash + sum(units[s] * history[s][i] for s in symbols)
                 notional = 0.0
                 for s in symbols:
@@ -100,3 +109,9 @@ def passes_bar(candidate: dict[str, Metrics], core: dict[str, Metrics]) -> bool:
     """Spec §3: Sharpe beats the core in both halves, and full-window drawdown ≥ 25% smaller."""
     return (candidate["h1"].sharpe > core["h1"].sharpe and candidate["h2"].sharpe > core["h2"].sharpe
             and candidate["full"].max_drawdown <= 0.75 * core["full"].max_drawdown)
+
+
+def passes_rebalance_bar(candidate: dict[str, Metrics], core: dict[str, Metrics]) -> bool:
+    """Spec §12: Sharpe beats the weekly core in both halves, and full-window return beats it."""
+    return (candidate["h1"].sharpe > core["h1"].sharpe and candidate["h2"].sharpe > core["h2"].sharpe
+            and candidate["full"].total_return > core["full"].total_return)

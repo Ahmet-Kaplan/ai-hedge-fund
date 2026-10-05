@@ -14,7 +14,7 @@ import json
 import sys
 from datetime import date, datetime, timedelta, timezone
 
-from hedge_fund.crypto.backtest import passes_bar, run_backtest, split_metrics
+from hedge_fund.crypto.backtest import passes_bar, passes_rebalance_bar, run_backtest, split_metrics
 from hedge_fund.crypto.rules import RULES, WARMUP_DAYS
 from hedge_fund.data.crypto_prices import CryptoPriceSource, crypto_closes
 from hedge_fund.data.store import MarketStore
@@ -23,6 +23,7 @@ from hedge_fund.paths import CRYPTO_DIR, MARKET_DB_PATH
 CORE_WEIGHTS = {"BTC/USD": 0.6, "ETH/USD": 0.3, "SOL/USD": 0.1}
 DATA_START = "2021-01-01"
 SPLIT = "2023-06-30"
+BANDS = {"band10": 0.10, "band20": 0.20}   # spec §12, pre-registered
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,6 +41,8 @@ def evaluate(closes: dict[str, dict[str, float]], *, fee_bps: float, end: str) -
     variants = {"core": None, **RULES}
     results = {name: run_backtest(closes, CORE_WEIGHTS, rule, fee_bps=fee_bps, start=start, end=end)
                for name, rule in variants.items()}
+    results.update({name: run_backtest(closes, CORE_WEIGHTS, None, fee_bps=fee_bps, start=start, end=end, band=b)
+                    for name, b in BANDS.items()})
     split = {name: split_metrics(r, SPLIT) for name, r in results.items()}
     rows = []
     for name, r in results.items():
@@ -49,7 +52,8 @@ def evaluate(closes: dict[str, dict[str, float]], *, fee_bps: float, end: str) -
             "total_return": m["full"].total_return, "annualized": m["full"].annualized_return,
             "sharpe": m["full"].sharpe, "sharpe_h1": m["h1"].sharpe, "sharpe_h2": m["h2"].sharpe,
             "max_drawdown": m["full"].max_drawdown, "fees_pct": r.fees / r.nav[0],
-            "passes": None if name == "core" else passes_bar(m, split["core"]),
+            "passes": None if name == "core" else (passes_rebalance_bar(m, split["core"]) if name in BANDS
+                                                   else passes_bar(m, split["core"])),
         })
     return rows
 

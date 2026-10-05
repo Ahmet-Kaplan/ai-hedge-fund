@@ -58,3 +58,25 @@ def test_metrics_and_bar():
     assert passes_bar(good, core) is True
     assert passes_bar({**good, "h2": m(0.9, 0.3)}, core) is False         # loses one half
     assert passes_bar({**good, "full": m(1.15, 0.5)}, core) is False      # drawdown only 17% smaller
+
+
+def test_band_rebalance_trades_only_on_big_drift():
+    closes = flat(21)
+    r = run_backtest(closes, WEIGHTS, None, fee_bps=0, start="2024-06-03", end="2024-06-23", capital=1000.0, band=0.2)
+    assert list(r.traded) == ["2024-06-03"]                       # initial buy, then nothing on flat prices
+    closes["A/USD"].update({d: 200.0 for d in days("2024-06-12", 10)})   # A doubles on Wed 06-12
+    r = run_backtest(closes, WEIGHTS, None, fee_bps=0, start="2024-06-03", end="2024-06-21", capital=1000.0, band=0.2)
+    assert "2024-06-12" in r.traded                              # A at 2/3 of the basket: 33% past its 50% target
+    assert "2024-06-10" not in r.traded                          # no Monday calendar rebalance in band mode
+
+
+def test_rebalance_bar_needs_both_halves_and_more_return():
+    from hedge_fund.crypto.backtest import passes_rebalance_bar
+
+    def m(sharpe, total):
+        return Metrics(total_return=total, annualized_return=0.0, sharpe=sharpe, max_drawdown=0.5)
+
+    core = {"h1": m(0.4, 0.0), "h2": m(0.8, 0.0), "full": m(0.6, 2.4)}
+    assert passes_rebalance_bar({"h1": m(0.5, 0), "h2": m(0.9, 0), "full": m(0.7, 2.5)}, core) is True
+    assert passes_rebalance_bar({"h1": m(0.5, 0), "h2": m(0.9, 0), "full": m(0.7, 2.3)}, core) is False
+    assert passes_rebalance_bar({"h1": m(0.3, 0), "h2": m(0.9, 0), "full": m(0.7, 2.5)}, core) is False
