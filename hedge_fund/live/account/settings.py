@@ -22,6 +22,7 @@ class LiveSettings(BaseModel):
     rebalance: Literal["daily", "weekly", "monthly"] = "weekly"
     agent_share: float = Field(default=0.0, ge=0, le=0.5, description="fraction of the account the satellite gets")
     satellite_max_name_pct: float = Field(default=0.10, gt=0, le=1)
+    satellite_min_position_usd: float = Field(default=5.0, ge=1.0, description="smallest AI pick; fewer picks in a small account")
     shorts_enabled: bool = Field(default=False, description="set true only after enabling margin at Alpaca")
     short_min_equity: float = Field(default=2000.0, ge=2000.0)
     satellite_halt_relative: float = Field(default=0.10, gt=0, lt=1)

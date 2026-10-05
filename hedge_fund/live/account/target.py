@@ -10,6 +10,7 @@ from hedge_fund.live.ledger import Ledger
 
 def satellite_weights(
     paper_weights: dict[str, float], share: float, *, shorts_ok: bool, max_name: float, core_ticker: str,
+    max_names: int | None = None,
 ) -> dict[str, float]:
     """The paper fund's active book rescaled so its gross equals `share` of the account.
 
@@ -18,6 +19,8 @@ def satellite_weights(
     never to other names.
     """
     bets = {t: w for t, w in paper_weights.items() if w and t != core_ticker and (shorts_ok or w > 0)}
+    if max_names is not None:   # only the strongest convictions
+        bets = dict(sorted(bets.items(), key=lambda kv: (-abs(kv[1]), kv[0]))[:max(0, max_names)])
     gross = sum(abs(w) for w in bets.values())
     if share <= 0 or gross <= 0:
         return {}
@@ -50,3 +53,23 @@ def account_book(stock_book: dict[str, float], settings: LiveSettings) -> dict[s
     for t, w in settings.crypto_core.items():
         book[t] = book.get(t, 0.0) + w * share
     return book
+
+
+def affordable_satellite(
+    paper_weights: dict[str, float], share: float, *, shorts_ok: bool, max_name: float, core_ticker: str,
+    satellite_dollars: float, min_position_usd: float,
+) -> dict[str, float]:
+    """The satellite with as many of the strongest picks as the money allows.
+
+    Weights follow conviction; the weakest picks are dropped until every
+    pick is worth at least `min_position_usd`. A small account holds a few
+    picks, and the number grows with deposits.
+    """
+    n = int(satellite_dollars // min_position_usd) if min_position_usd > 0 else len(paper_weights)
+    while n > 0:
+        sat = satellite_weights(paper_weights, share, shorts_ok=shorts_ok, max_name=max_name,
+                                core_ticker=core_ticker, max_names=n)
+        if sat and min(abs(w) / share * satellite_dollars for w in sat.values()) >= min_position_usd - 1e-9:
+            return sat
+        n -= 1
+    return {}

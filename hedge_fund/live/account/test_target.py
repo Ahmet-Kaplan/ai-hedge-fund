@@ -55,3 +55,11 @@ def test_account_book_splits_halves():
 
 def test_no_crypto_share_leaves_the_stock_book_alone():
     assert account_book({"SPY": 1.0}, LiveSettings()) == {"SPY": 1.0}
+
+
+def test_max_names_keeps_only_the_strongest_picks():
+    paper = {"A": 0.04, "B": -0.03, "C": 0.02, "D": 0.01}
+    sat = satellite_weights(paper, 0.5, shorts_ok=False, max_name=1.0, core_ticker="SPY", max_names=2)
+    assert set(sat) == {"A", "C"}                                   # shorts dropped first, then top 2 longs
+    assert sum(sat.values()) == pytest.approx(0.5)
+    assert satellite_weights(paper, 0.5, shorts_ok=False, max_name=1.0, core_ticker="SPY", max_names=0) == {}

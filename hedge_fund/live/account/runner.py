@@ -20,7 +20,7 @@ from hedge_fund.data.sessions import NEW_YORK
 from hedge_fund.live.account.ledger import LiveLedger, LiveNavRow
 from hedge_fund.live.account.orders import PlannedOrder, check_orders, size_orders
 from hedge_fund.live.account.settings import LiveSettings
-from hedge_fund.live.account.target import account_book, latest_paper_weights, satellite_weights, target_book
+from hedge_fund.live.account.target import account_book, affordable_satellite, latest_paper_weights, target_book
 from hedge_fund.live.calendar import ORDER_CUTOFF, is_rebalance_day, ny_midnight
 from hedge_fund.live.ledger import Ledger
 from hedge_fund.paths import KILL_PATH
@@ -150,8 +150,10 @@ def submit_live(
     equity = cash + sum(q * marks[t] for t, q in holdings.items())
     shorts_ok = settings.shorts_enabled and equity >= settings.short_min_equity
     if fresh:
-        satellite = satellite_weights(paper_weights, share, shorts_ok=shorts_ok,
-                                      max_name=settings.satellite_max_name_pct, core_ticker=core)
+        satellite = affordable_satellite(
+            paper_weights, share, shorts_ok=shorts_ok, max_name=settings.satellite_max_name_pct, core_ticker=core,
+            satellite_dollars=share * (1 - settings.crypto_share) * equity,
+            min_position_usd=settings.satellite_min_position_usd)
     else:   # the paper fund missed its run: hold the satellite as last set
         satellite = _last_fresh_satellite(ledger) if share > 0 else {}
     target = account_book(target_book(satellite, core), settings)

@@ -194,3 +194,22 @@ def test_reconcile_values_crypto_separately_from_the_satellite(env):
     assert (row.core_value, row.crypto_value, row.satellite_value) == (100.0, 60.0, 0.0)
     assert row.satellite_return is None             # crypto is not the satellite
     assert row.equity == 160.0
+
+
+def test_small_account_holds_only_the_picks_it_can_afford(env):
+    env["live"].mark_dry_run_done()
+    picks = {"AAPL": 0.05, "MSFT": 0.04, "NVDA": 0.03, "META": 0.02, "V": 0.015, "KO": 0.01, "PG": 0.005}
+    env["paper"].write_plan("2026-08-24", {"plan": {"decision": {"final_weights": picks}}})
+    closes = {t: {d: 100.0 for d in SESSIONS} for t in picks} | {"SPY": CLOSES["SPY"]}
+    client = FakeLive(cash=100.0)
+    s = LiveSettings(confirm_live=True, crypto_share=0.5, agent_share=0.5, cash_buffer_pct=0.0,
+                     satellite_min_position_usd=5.0, satellite_max_name_pct=0.5)
+    result = submit_live(s, client, FakeDataClient(closes), env["live"], env["paper"], now=MON,
+                         kill_path=env["kill"], crypto_marks=crypto_marks)
+    satellite = {t for t in result.target if t in picks}
+    # $25 for picks: 5 at conviction weights would leave META/V under $5, so the weakest are
+    # dropped until every pick is ≥ $5: the top 3 ($10.42, $8.33, $6.25).
+    assert satellite == {"AAPL", "MSFT", "NVDA"}
+    bought = {t: kw["notional"] for t, side, kw in client.sent}
+    assert all(bought[t] >= 5.0 for t in satellite)
+    assert sum(bought[t] for t in satellite) == pytest.approx(25.0, abs=0.05)
