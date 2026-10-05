@@ -1,6 +1,6 @@
 """aihf-live — the real-money account: S&P 500 core + a satellite mirroring the paper fund.
 
-    aihf-live init                     write a safe ~/.hedge-fund/live.yaml (confirm_live: false)
+    aihf-live init                     write a safe ./live.yaml (confirm_live: false)
     aihf-live status                   account, settings, halts
     aihf-live run [--dry-run]          reconcile yesterday, then submit today
     aihf-live reconcile | submit [--dry-run]
@@ -38,13 +38,24 @@ from hedge_fund.tui.keys import apply_credentials
 logger = logging.getLogger("aihf-live")
 
 
+def default_settings_path() -> Path:
+    """live.yaml in the working directory (the repo), like .env; else ~/.hedge-fund/live.yaml.
+
+    The local file wins when both exist. With neither, `init` creates the local one.
+    """
+    local = Path.cwd() / "live.yaml"
+    if local.exists() or not LIVE_SETTINGS_PATH.exists():
+        return local
+    return LIVE_SETTINGS_PATH
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aihf-live", description="Run the real-money core + satellite account.")
     sub = parser.add_subparsers(dest="command", required=True)
 
     def command(name: str, help: str) -> argparse.ArgumentParser:
         p = sub.add_parser(name, help=help)
-        p.add_argument("--settings", default=str(LIVE_SETTINGS_PATH))
+        p.add_argument("--settings", default=None, help="settings file (default: ./live.yaml, else ~/.hedge-fund/live.yaml)")
         return p
 
     command("init", "write a safe live.yaml (never overwrites)")
@@ -60,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     apply_credentials()
     args = build_parser().parse_args(argv)
-    path = Path(args.settings)
+    path = Path(args.settings) if args.settings else default_settings_path()
     if args.command == "init":
         if path.exists():
             print(f"{path} already exists; not overwriting")

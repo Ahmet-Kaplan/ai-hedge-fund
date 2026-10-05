@@ -124,7 +124,7 @@ the share of the account the agents have earned:
   (`aihf-live report` shows deposits, value, and a time-weighted return next to
   the core ETF's).
 
-**Crypto half.** Set `crypto_share: 0.5` in `~/.hedge-fund/live.yaml` to hold half
+**Crypto half.** Set `crypto_share: 0.5` in `live.yaml` (in the repo) to hold half
 the account as buy-and-hold 60/30/10 BTC/ETH/SOL (`crypto_core`); deposits are
 split between the halves by target, and the stock rules (satellite, its cap, its
 halt) never touch crypto. No trend rule passed its backtest (`aihf-crypto
@@ -136,11 +136,11 @@ Setup: add `ALPACA_LIVE_KEY_ID` / `ALPACA_LIVE_SECRET_KEY` (live keys; the
 client refuses paper keys), then
 
 ```bash
-aihf-live init            # writes ~/.hedge-fund/live.yaml with confirm_live: false
+aihf-live init            # writes ./live.yaml (gitignored) with confirm_live: false
 aihf-live run --dry-run   # review the plan; nothing is sent
 ```
 
-Set `confirm_live: true` in `~/.hedge-fund/live.yaml`, then run `aihf-live run`
+Set `confirm_live: true` in `live.yaml`, then run `aihf-live run`
 each weekday after the paper command. `touch ~/.hedge-fund/KILL` stops both.
 
 Before funding an account, check yourself: whether Alpaca offers live accounts

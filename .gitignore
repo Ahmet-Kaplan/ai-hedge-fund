@@ -61,3 +61,6 @@ outputs/
 
 # Local-only release tooling
 scripts/release.sh
+
+# Real-money account settings (aihf-live): personal, never committed
+live.yaml
