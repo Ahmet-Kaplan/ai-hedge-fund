@@ -258,3 +258,24 @@ the 2022 drawdown sharply and beat holding in 2023–26, but lose in the
 2021–mid-2023 half after whipsaw and Alpaca's 25 bps fees. Their trader.dev
 results (BTC only, from the 2020 low, 0.05% fees, td2 with shorts on perps)
 do not carry over to this account. The crypto half stays buy-and-hold.
+
+## 14. Maker-fee re-test (pre-registered 2026-10-05, before running)
+
+Question: fees are the main thing sinking the trend rules. Alpaca charges
+level-1 **makers** 15 bps instead of 25 — a limit order that rests on the
+book rather than taking the market price. Would any rule pass at that cost?
+
+This is a second look at rules that already failed, so the bar is stricter,
+not looser:
+
+- Variants (fixed, no new ones, no parameter changes): every §11–13 variant
+  (`ma100`, `mom12w`, `ma_cross`, `td1`, `td2`, `band10`, `band20`), same
+  data, window, halves and execution. The core is re-run at the same fee.
+- A variant passes only if it passes its own bar (§3 for trend rules, §12
+  for bands) **at both 15 bps and 20 bps**. 15 assumes every limit order
+  fills as a maker; 20 is the margin for limit orders that don't fill and
+  have to be chased at the taker price (in a sharp move — exactly when a
+  trend rule trades — a resting order is the one most likely to be missed).
+- Pass → build limit-order execution for crypto in `aihf-live`, then the
+  rule as a live setting, paper-checked first. Fail → buy-and-hold stays and
+  the trend-rule line of work is closed.
