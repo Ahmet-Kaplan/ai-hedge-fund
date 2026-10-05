@@ -39,6 +39,7 @@ aihf = "hedge_fund.run:main"
 aihf-paper = "hedge_fund.live.cli:main"
 aihf-live = "hedge_fund.live.account.cli:main"
 aihf-crypto = "hedge_fund.crypto.cli:main"
+aihf-daily = "hedge_fund.ops.daily:main"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
