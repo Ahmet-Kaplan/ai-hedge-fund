@@ -118,7 +118,7 @@ def submit_live(
 
     if kill_path.exists():
         return done("killed", f"{kill_path} exists")
-    if not settings.confirm_live:
+    if not settings.confirm_live and not dry_run:   # a dry run is how you check before confirming
         return done("not_confirmed", "set confirm_live: true in live.yaml to allow real orders")
     if not dry_run and not ledger.dry_run_done():
         return done("needs_dry_run", "run `aihf-live submit --dry-run` once and review it first")

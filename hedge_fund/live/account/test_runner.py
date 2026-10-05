@@ -213,3 +213,14 @@ def test_small_account_holds_only_the_picks_it_can_afford(env):
     bought = {t: kw["notional"] for t, side, kw in client.sent}
     assert all(bought[t] >= 5.0 for t in satellite)
     assert sum(bought[t] for t in satellite) == pytest.approx(25.0, abs=0.05)
+
+
+def test_dry_run_works_before_confirming_live(env):
+    client = FakeLive(cash=100.0)
+    unconfirmed = LiveSettings(confirm_live=False, cash_buffer_pct=0.0)
+    dry = submit_live(unconfirmed, client, FakeDataClient(CLOSES), env["live"], env["paper"], now=MON,
+                      dry_run=True, kill_path=env["kill"])
+    assert dry.status == "dry_run" and client.sent == [] and env["live"].dry_run_done()
+    real = submit_live(unconfirmed, client, FakeDataClient(CLOSES), env["live"], env["paper"], now=MON,
+                       kill_path=env["kill"])
+    assert real.status == "not_confirmed" and client.sent == []
