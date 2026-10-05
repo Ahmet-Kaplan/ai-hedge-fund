@@ -1,0 +1,87 @@
+# Copy into the PRIVATE runner repo as .github/workflows/daily.yml (see deploy/README.md).
+name: hedge-fund daily
+
+on:
+  schedule:
+    - cron: "0 8 * * 1-5"          # 08:00 UTC weekdays: US pre-market all year
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Override RUN_MODE for this run (blank = the RUN_MODE variable)"
+        type: choice
+        options: ["", "off", "paper", "paper+live-dry", "paper+live"]
+        default: ""
+
+concurrency:
+  group: hedge-fund-daily
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      RUN_MODE: ${{ inputs.mode || vars.RUN_MODE || 'paper' }}
+    steps:
+      - name: Code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.CODE_REPO || 'viveksingh101994/ai-hedge-fund' }}
+          ref: ${{ vars.CODE_REF || 'alpaca-paper-trading' }}
+          path: code
+
+      - name: State
+        uses: actions/checkout@v4
+        with:
+          ref: state
+          path: state
+
+      - name: Link state to ~/.hedge-fund
+        run: ln -sfn "$GITHUB_WORKSPACE/state" "$HOME/.hedge-fund"
+
+      - name: Restore market database
+        uses: actions/cache/restore@v4
+        with:
+          path: state/market.db
+          key: market-db-${{ github.run_id }}
+          restore-keys: market-db-
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install uv && uv pip install --system -e code/
+
+      - name: Run
+        id: run
+        env:
+          APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
+          APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ALPACA_LIVE_KEY_ID: ${{ secrets.ALPACA_LIVE_KEY_ID }}
+          ALPACA_LIVE_SECRET_KEY: ${{ secrets.ALPACA_LIVE_SECRET_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: aihf-daily --notify
+
+      - name: Save market database
+        if: always() && hashFiles('state/market.db') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: state/market.db
+          key: market-db-${{ github.run_id }}
+
+      - name: Save state
+        if: always()
+        working-directory: state
+        run: |
+          git config user.name "hedge-fund-bot"
+          git config user.email "hedge-fund-bot@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "state: $(date -u +%F) $RUN_MODE"
+          git push || (git pull --rebase && git push)

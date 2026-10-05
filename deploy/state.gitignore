@@ -1,0 +1,4 @@
+market.db
+market.db-*
+.env
+*.pyc
