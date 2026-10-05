@@ -182,3 +182,20 @@ it whipsaws. The crypto half is buy-and-hold only: Phase 2 is the live
 integration with `crypto_trend_share` fixed at 0, and the LLM overlay is not
 built (it was defined as an overlay on a passing rule). Up to two trader.dev
 candidates may still be pre-registered (§2) and tested the same way.
+
+## 12. Band rebalancing experiment (pre-registered 2026-10-05, before running)
+
+Question: instead of rebalancing the 60/30/10 core every Monday, does
+rebalancing only when a coin drifts far from its target — checked every
+weekday — do better after fees? It stays fully invested, so the trend rules'
+drawdown bar doesn't apply; the bar is efficiency.
+
+- Variants (fixed now, no others): `band10`, `band20` — each weekday, if any
+  coin's weight is more than 10% / 20% away from its target *relative* to
+  that target (e.g. SOL outside 9–11% / 8–12% of the crypto half), rebalance
+  all three to 60/30/10 at that day's close; otherwise do nothing. No
+  calendar rebalance. Same data, window, halves and 25 bps fees as §11.
+- Bar: Sharpe beats the weekly-rebalanced core in **both** halves **and**
+  full-window total return beats the core's, after fees.
+- Pass → becomes a live crypto setting (`crypto_rebalance: band`). Fail →
+  weekly stays.
