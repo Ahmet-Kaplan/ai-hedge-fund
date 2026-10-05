@@ -199,3 +199,18 @@ drawdown bar doesn't apply; the bar is efficiency.
   full-window total return beats the core's, after fees.
 - Pass → becomes a live crypto setting (`crypto_rebalance: band`). Fail →
   weekly stays.
+
+### 12a. Results (2026-10-05)
+
+2021-07-20 → 2026-10-04, 25 bps per side.
+
+| Variant | Total | Annual | Sharpe H1 | Sharpe H2 | Max DD | Fees | Passes |
+|---|---|---|---|---|---|---|---|
+| Weekly core | +245% | +26.9% | 0.43 | 0.81 | 79.2% | 3.4% | — |
+| band10 | +235% | +26.1% | 0.42 | 0.81 | 79.3% | 2.4% | no |
+| band20 | +243% | +26.7% | 0.42 | 0.82 | 79.3% | 1.8% | no |
+
+Verdict: neither passes (both trail weekly on total return and on first-half
+Sharpe). Bands halve fees but rebalance later after big moves; net, the
+method changes five-year results by a few percent at most. The crypto core
+keeps weekly rebalancing.
