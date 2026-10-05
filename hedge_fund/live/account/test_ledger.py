@@ -51,3 +51,10 @@ def test_reviews_and_satellite_excess(tmp_path):
     # satellite 1.01 × 0.95 − 1 = −4.05%; core 520.2/500 − 1 = +4.04%
     assert ledger.satellite_excess(since="2026-10-01") == pytest.approx(0.9595 - 1.0404, abs=1e-6)
     assert ledger.satellite_excess(since="2026-10-06") is None
+
+
+def test_crypto_limit_attempts_round_trip(tmp_path):
+    ledger = LiveLedger(tmp_path / "live")
+    assert ledger.crypto_limits() == {}
+    ledger.save_crypto_limits({"BTC/USD": {"side": "buy", "tries": 2}})
+    assert ledger.crypto_limits() == {"BTC/USD": {"side": "buy", "tries": 2}}

@@ -81,3 +81,38 @@ def test_crypto_orders_are_good_til_cancelled():
     client.buy_notional("SPY", 30.0, "c")
     assert session.calls[0]["json"]["time_in_force"] == "gtc"
     assert session.calls[1]["json"]["time_in_force"] == "day"
+
+
+ORDER = {"id": "o", "client_order_id": "c", "symbol": "BTC/USD", "side": "buy", "qty": "0.0005",
+         "notional": None, "filled_qty": "0", "filled_avg_price": None, "status": "new",
+         "type": "limit", "limit_price": "60000", "asset_class": "crypto"}
+
+
+def test_limit_order_is_good_til_cancelled_at_a_price():
+    client, session = live(FakeResponse(payload=ORDER))
+    order = client.limit_order("BTC/USD", "buy", 0.0005, 60_000.0, "c")
+    assert session.calls[0]["json"] == {"symbol": "BTC/USD", "qty": "0.0005", "side": "buy", "type": "limit",
+                                        "limit_price": "60000", "time_in_force": "gtc", "client_order_id": "c"}
+    assert (order.order_type, order.limit_price, order.qty) == ("limit", 60_000.0, 0.0005)
+
+
+def test_open_orders_use_pair_names():
+    client, session = live(FakeResponse(payload=[{**ORDER, "symbol": "BTCUSD"}]))
+    assert [o.ticker for o in client.open_orders()] == ["BTC/USD"]
+    assert session.calls[0]["params"]["status"] == "open"
+
+
+def test_cancel_orders_waits_until_they_are_done():
+    client, session = live(FakeResponse(204, None), FakeResponse(payload={**ORDER, "status": "pending_cancel"}),
+                           FakeResponse(payload={**ORDER, "status": "canceled", "filled_qty": "0.0001"}))
+    client._sleep = lambda s: None
+    done = client.cancel_orders(["o"])
+    assert session.calls[0]["method"] == "DELETE" and session.calls[0]["url"].endswith("/v2/orders/o")
+    assert done["o"].status == "canceled" and done["o"].filled_qty == 0.0001
+
+
+def test_cancel_of_an_order_that_just_filled_is_not_an_error():
+    client, _ = live(FakeResponse(422, {"message": "order is already in filled state"}),
+                     FakeResponse(payload={**ORDER, "status": "filled"}))
+    client._sleep = lambda s: None
+    assert client.cancel_orders(["o"])["o"].status == "filled"

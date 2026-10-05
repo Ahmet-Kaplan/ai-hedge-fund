@@ -115,6 +115,16 @@ class LiveLedger(Ledger):
             used = True
         return sat - core if used else None
 
+    # -- crypto limit orders -------------------------------------------------
+    def crypto_limits(self) -> dict[str, dict]:
+        """{pair: {"side", "tries"}} — consecutive limit attempts still waiting to fill."""
+        path = self.root / "crypto_limits.json"
+        return json.loads(path.read_text()) if path.exists() else {}
+
+    def save_crypto_limits(self, limits: dict[str, dict]) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        (self.root / "crypto_limits.json").write_text(json.dumps(limits, indent=2, sort_keys=True))
+
     def satellite_plans(self) -> list[tuple[str, dict]]:
         return [(s, self.read_plan(s) or {}) for s in self.plan_sessions()]
 

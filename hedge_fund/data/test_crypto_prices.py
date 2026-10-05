@@ -64,3 +64,15 @@ def test_closes_are_cached_and_synced_incrementally(tmp_path):
     untouched = FakeSession()
     crypto_closes(store, CryptoPriceSource(session=untouched), ["BTC/USD"], "2021-01-01", "2021-01-03")
     assert untouched.calls == []                                       # fully cached
+
+
+def test_latest_quotes_are_bid_and_ask():
+    session = FakeSession(FakeResponse({"quotes": {"BTC/USD": {"bp": 60_000.0, "ap": 60_010.5, "bs": 1, "as": 1}}}))
+    assert CryptoPriceSource(session=session).latest_quotes(["BTC/USD"]) == {"BTC/USD": (60_000.0, 60_010.5)}
+    assert session.calls[0] == {"symbols": "BTC/USD"}
+
+
+def test_missing_or_crossed_quote_raises():
+    session = FakeSession(FakeResponse({"quotes": {"BTC/USD": {"bp": 0, "ap": 1}}}))
+    with pytest.raises(DataSourceError, match="ETH/USD"):
+        CryptoPriceSource(session=session).latest_quotes(["BTC/USD", "ETH/USD"])

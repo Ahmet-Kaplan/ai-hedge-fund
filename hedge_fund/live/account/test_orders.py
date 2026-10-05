@@ -1,6 +1,6 @@
 import pytest
 
-from hedge_fund.live.account.orders import PlannedOrder, check_orders, size_orders
+from hedge_fund.live.account.orders import PlannedOrder, check_orders, size_orders, to_limits
 
 MARKS = {"SPY": 500.0, "NVDA": 100.0, "WMT": 100.0}
 KW = dict(min_order_usd=1.0, min_trade_pct=0.005, cash_buffer_pct=0.0)
@@ -78,3 +78,42 @@ def test_crypto_core_names_are_exempt_from_the_satellite_cap():
     marks = {**MARKS, "BTC/USD": 60_000.0}
     check_orders([PlannedOrder(ticker="BTC/USD", side="buy", dollars=30.0)], {}, 100.0, marks,
                  {"SPY", "BTC/USD"}, shorts_ok=False, max_name=0.1)
+
+
+CRYPTO_MARKS = {**MARKS, "BTC/USD": 60_000.0, "ETH/USD": 3_000.0}
+
+
+def test_also_rebalance_sells_an_out_coin_on_a_cash_day():
+    orders = size_orders({"SPY": 0.2, "ETH/USD": 0.01}, 0.0, CRYPTO_MARKS, {"SPY": 0.5, "ETH/USD": 0.0},
+                         rebalance=False, also_rebalance={"ETH/USD"}, **KW)
+    assert orders == [PlannedOrder(ticker="ETH/USD", side="sell", qty=0.01)]
+    assert size_orders({"SPY": 0.2, "ETH/USD": 0.01}, 0.0, CRYPTO_MARKS, {"SPY": 0.5, "ETH/USD": 0.0},
+                       rebalance=False, **KW) == []
+
+
+def test_crypto_orders_become_limits_at_the_touch():
+    orders = [PlannedOrder(ticker="SPY", side="buy", dollars=50.0),
+              PlannedOrder(ticker="BTC/USD", side="buy", dollars=30.0),
+              PlannedOrder(ticker="ETH/USD", side="sell", qty=0.01)]
+    quotes = {"BTC/USD": (60_000.0, 60_010.0), "ETH/USD": (2_999.0, 3_001.0)}
+    spy, btc, eth = to_limits(orders, quotes, market=set())
+    assert spy == orders[0]
+    assert (btc.side, btc.qty, btc.limit_price, btc.dollars) == ("buy", 0.0005, 60_000.0, None)
+    assert (eth.side, eth.qty, eth.limit_price) == ("sell", 0.01, 3_001.0)
+
+
+def test_limit_buy_size_rounds_down_and_market_names_stay_market():
+    orders = [PlannedOrder(ticker="BTC/USD", side="buy", dollars=10.0),
+              PlannedOrder(ticker="ETH/USD", side="buy", dollars=10.0)]
+    btc, eth = to_limits(orders, {"BTC/USD": (30_000.0, 30_001.0)}, market={"ETH/USD"})
+    assert btc.qty == 0.000333333 and btc.qty * btc.limit_price <= 10.0
+    assert eth == orders[1]
+
+
+def test_check_counts_limit_buys_as_spend_and_growth():
+    buy = PlannedOrder(ticker="BTC/USD", side="buy", qty=0.001, limit_price=60_000.0)
+    check_orders([buy], {}, 60.0, CRYPTO_MARKS, {"BTC/USD"}, shorts_ok=False, max_name=0.1)
+    with pytest.raises(ValueError, match="spend"):
+        check_orders([buy], {}, 59.0, CRYPTO_MARKS, {"BTC/USD"}, shorts_ok=False, max_name=0.1)
+    with pytest.raises(ValueError, match="BTC/USD"):   # a limit buy grows the name, so the cap applies
+        check_orders([buy], {}, 600.0, CRYPTO_MARKS, set(), shorts_ok=False, max_name=0.05)

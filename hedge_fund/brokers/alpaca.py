@@ -13,6 +13,7 @@ submit-then-reconcile instead (hedge_fund/live/runner.py).
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Literal
 
 import requests
@@ -26,6 +27,7 @@ LIVE_BASE_URL = "https://api.alpaca.markets"
 # Alpaca answers a refused order with 403 (e.g. buying power) or 422 (e.g.
 # not shortable). Those are rejections to record, not crashes.
 _REJECTION_CODES = (403, 422)
+_FINAL = frozenset({"filled", "canceled", "expired", "rejected", "done_for_day", "replaced"})
 
 
 class AlpacaError(Exception):
@@ -58,7 +60,7 @@ class OrderResult(BaseModel):
 
 
 class LiveOrder(BaseModel):
-    """A live order: a dollar (notional) buy, or a fractional / whole-share quantity."""
+    """A live order: a dollar (notional) buy, a fractional / whole-share quantity, or a limit."""
 
     client_order_id: str
     ticker: str
@@ -70,6 +72,8 @@ class LiveOrder(BaseModel):
     filled_qty: float = 0.0
     filled_avg_price: float | None = None
     reason: str | None = None
+    order_type: str = "market"
+    limit_price: float | None = None
 
 
 class CashFlow(BaseModel):
@@ -108,7 +112,7 @@ class _AlpacaRest:
             raise AlpacaError(f"{method} {path}: {exc}") from exc
         if resp.status_code >= 400:
             raise AlpacaError(f"{method} {path}: HTTP {resp.status_code}: {resp.text[:300]}", status_code=resp.status_code)
-        return resp.json()
+        return None if resp.status_code == 204 else resp.json()
 
 
 class AlpacaPaperClient(_AlpacaRest):
@@ -198,6 +202,7 @@ class AlpacaLiveClient(_AlpacaRest):
         if key_id == os.environ.get("APCA_API_KEY_ID"):
             raise ValueError("ALPACA_LIVE_KEY_ID is the paper key; the live account needs its own live keys")
         super().__init__(key_id, secret_key, LIVE_BASE_URL, timeout=timeout, session=session)
+        self._sleep = time.sleep
 
     def holdings(self) -> dict[str, float]:
         """Signed share quantities, fractions included. Negative = short."""
@@ -227,6 +232,35 @@ class AlpacaLiveClient(_AlpacaRest):
         """Whole-share market day order — shorts and covers."""
         return self._send({"symbol": ticker, "qty": str(shares), "side": side}, client_order_id)
 
+    def limit_order(self, ticker: str, side: Literal["buy", "sell"], qty: float, limit_price: float,
+                    client_order_id: str) -> LiveOrder:
+        """Good-til-cancelled limit order (crypto). At the touch it rests on the book: a maker."""
+        return self._send({"symbol": ticker, "qty": _qty(qty), "side": side, "type": "limit",
+                           "limit_price": _qty(limit_price)}, client_order_id)
+
+    def open_orders(self) -> list[LiveOrder]:
+        return [_live_order(row) for row in self._request("GET", "/v2/orders", params={
+            "status": "open", "limit": 500, "direction": "asc"})]
+
+    def cancel_orders(self, order_ids: list[str], *, wait_s: float = 10.0) -> dict[str, LiveOrder]:
+        """Cancel, then wait (up to wait_s) until each order is final; returns its last state."""
+        for order_id in order_ids:
+            try:
+                self._request("DELETE", f"/v2/orders/{order_id}")
+            except AlpacaError as exc:
+                if exc.status_code != 422:      # 422: already filled or cancelled
+                    raise
+        final: dict[str, LiveOrder] = {}
+        deadline = time.monotonic() + wait_s
+        for order_id in order_ids:
+            while True:
+                order = _live_order(self._request("GET", f"/v2/orders/{order_id}"))
+                if order.status in _FINAL or time.monotonic() > deadline:
+                    final[order_id] = order
+                    break
+                self._sleep(0.5)
+        return final
+
     def cash_flows(self, after: str) -> list[CashFlow]:
         """Deposits, withdrawals, journals, dividends and fees after date `after` (YYYY-MM-DD)."""
         flows: list[CashFlow] = []
@@ -242,7 +276,7 @@ class AlpacaLiveClient(_AlpacaRest):
     def _send(self, body: dict, client_order_id: str) -> LiveOrder:
         # Alpaca rejects "day" for crypto; pairs ("BTC/USD") go good-til-cancelled.
         tif = "gtc" if "/" in body["symbol"] else "day"
-        body = {**body, "type": "market", "time_in_force": tif, "client_order_id": client_order_id}
+        body = {"type": "market", **body, "time_in_force": tif, "client_order_id": client_order_id}
         try:
             return _live_order(self._request("POST", "/v2/orders", json=body))
         except AlpacaError as exc:
@@ -260,10 +294,12 @@ def _qty(qty: float) -> str:
 def _live_order(row: dict) -> LiveOrder:
     def num(key: str) -> float | None:
         return float(row[key]) if row.get(key) not in (None, "") else None
+    symbol = pair(row["symbol"]) if row.get("asset_class") == "crypto" else row["symbol"]
     return LiveOrder(
-        client_order_id=row["client_order_id"], ticker=row["symbol"], side=row["side"], status=row["status"],
+        client_order_id=row["client_order_id"], ticker=symbol, side=row["side"], status=row["status"],
         qty=num("qty"), notional=num("notional"), order_id=row.get("id"),
         filled_qty=num("filled_qty") or 0.0, filled_avg_price=num("filled_avg_price"),
+        order_type=row.get("type") or "market", limit_price=num("limit_price"),
     )
 
 

@@ -51,6 +51,9 @@ class FakeLive:
     def trade_shares(self, ticker, side, shares, cid):
         return self._order(cid, ticker, side, qty=float(shares))
 
+    def open_orders(self):
+        return []
+
 
 @pytest.fixture
 def env(tmp_path):
@@ -224,3 +227,144 @@ def test_dry_run_works_before_confirming_live(env):
     real = submit_live(unconfirmed, client, FakeDataClient(CLOSES), env["live"], env["paper"], now=MON,
                        kill_path=env["kill"])
     assert real.status == "not_confirmed" and client.sent == []
+
+
+# -- ma100 + limit orders (spec §15) ------------------------------------------
+
+UP, DOWN = [float(x) for x in range(1, 151)], [float(x) for x in range(150, 0, -1)]
+QUOTES = {"BTC/USD": (59_990.0, 60_010.0), "ETH/USD": (2_999.0, 3_001.0), "SOL/USD": (149.9, 150.1)}
+HELD = {"SPY": 0.2, "BTC/USD": 0.001, "ETH/USD": 0.01, "SOL/USD": 0.0666667}   # $100 SPY + $100 crypto 60/30/10
+
+
+class FakeTrendLive(FakeLive):
+    def __init__(self, *a, open_orders=(), **kw):
+        super().__init__(*a, **kw)
+        self.open, self.cancelled = list(open_orders), []
+
+    def open_orders(self):
+        return list(self.open)
+
+    def cancel_orders(self, ids):
+        self.cancelled += ids
+        return {o.order_id: o.model_copy(update={"status": "canceled"}) for o in self.open if o.order_id in ids}
+
+    def limit_order(self, ticker, side, qty, limit_price, cid):
+        return self._order(cid, ticker, side, qty=qty, limit_price=limit_price)
+
+
+def trend_run(env, client, trend, history, now=TUE, dry_run=False, **kw):
+    seen = {}
+
+    def crypto_history(names, day):
+        seen["day"] = day
+        return {n: history[n] for n in names}
+
+    s = LiveSettings(confirm_live=True, crypto_share=0.5, crypto_trend=trend, cash_buffer_pct=0.0, **kw)
+    result = submit_live(s, client, FakeDataClient(CLOSES), env["live"], env["paper"], now=now, dry_run=dry_run,
+                         kill_path=env["kill"], crypto_marks=crypto_marks, crypto_history=crypto_history,
+                         crypto_quotes=lambda names: {n: QUOTES[n] for n in names})
+    return result, seen
+
+
+def test_ma100_sells_an_out_coin_on_a_cash_day_at_the_ask(env):
+    env["live"].mark_dry_run_done()
+    client = FakeTrendLive(holdings=HELD, cash=0.0)
+    result, seen = trend_run(env, client, "ma100", {"BTC/USD": UP, "ETH/USD": DOWN, "SOL/USD": UP})
+    assert seen["day"] == "2026-08-24"                     # the last completed UTC day at 08:00 UTC
+    assert result.exposure == {"BTC/USD": 1, "ETH/USD": 0, "SOL/USD": 1}
+    assert client.sent == [("ETH/USD", "sell", {"qty": 0.01, "limit_price": 3_001.0})]
+    assert result.target["ETH/USD"] == 0.0
+
+
+def test_out_coin_cash_is_not_spent_on_the_other_coins_or_stocks(env):
+    env["live"].mark_dry_run_done()
+    client = FakeTrendLive(holdings={"SPY": 0.2, "BTC/USD": 0.001, "SOL/USD": 0.0666667}, cash=30.0)   # ETH sold
+    result, _ = trend_run(env, client, "ma100", {"BTC/USD": UP, "ETH/USD": DOWN, "SOL/USD": UP})
+    assert result.status == "nothing_to_do" and client.sent == []
+
+
+def test_shadow_trades_buy_and_hold_and_reports_ma100(env):
+    env["live"].mark_dry_run_done()
+    client = FakeTrendLive(holdings=HELD, cash=0.0)
+    result, _ = trend_run(env, client, "shadow", {"BTC/USD": UP, "ETH/USD": DOWN, "SOL/USD": UP})
+    assert client.sent == [] and result.status == "nothing_to_do"
+    assert result.exposure == {"BTC/USD": 1, "ETH/USD": 0, "SOL/USD": 1}
+    assert [(o.ticker, o.side) for o in result.shadow] == [("ETH/USD", "sell")]
+    assert result.target["ETH/USD"] == pytest.approx(0.15)   # buy-and-hold target unchanged
+
+
+def test_ma100_buys_with_limits_at_the_bid_and_counts_tries(env):
+    env["live"].mark_dry_run_done()
+    client = FakeTrendLive(cash=200.0)
+    trend_run(env, client, "ma100", {"BTC/USD": UP, "ETH/USD": UP, "SOL/USD": UP}, now=MON)
+    sent = {t: kw for t, side, kw in client.sent}
+    assert sent["SPY"] == {"notional": 100.0}
+    assert sent["BTC/USD"] == {"qty": pytest.approx(60.0 / 59_990.0, abs=1e-9), "limit_price": 59_990.0}
+    assert env["live"].crypto_limits()["BTC/USD"] == {"side": "buy", "tries": 1}
+
+
+def test_unfilled_limits_are_cancelled_retried_then_sent_at_market(env):
+    live = env["live"]
+    live.mark_dry_run_done()
+    stale = LiveOrder(client_order_id="live-2026-08-24-BTC/USD-buy", ticker="BTC/USD", side="buy", status="new",
+                      qty=0.001, order_id="o1", order_type="limit", limit_price=59_000.0)
+    live.save_crypto_limits({"BTC/USD": {"side": "buy", "tries": 1}})
+    holdings = {"SPY": 0.2, "ETH/USD": 0.01, "SOL/USD": 0.0666667}
+    client = FakeTrendLive(holdings=holdings, cash=60.0, open_orders=[stale])
+    trend_run(env, client, "ma100", {"BTC/USD": UP, "ETH/USD": UP, "SOL/USD": UP})
+    assert client.cancelled == ["o1"]
+    assert client.sent == [("BTC/USD", "buy", {"qty": pytest.approx(60.0 / 59_990.0, rel=1e-3), "limit_price": 59_990.0})]
+    assert live.crypto_limits()["BTC/USD"]["tries"] == 2
+
+    live.save_crypto_limits({"BTC/USD": {"side": "buy", "tries": 2}})       # missed a second day
+    client = FakeTrendLive(holdings=holdings, cash=60.0, open_orders=[stale.model_copy(update={"client_order_id": "live-2026-08-21-BTC/USD-buy"})])
+    trend_run(env, client, "ma100", {"BTC/USD": UP, "ETH/USD": UP, "SOL/USD": UP})
+    assert client.sent == [("BTC/USD", "buy", {"notional": pytest.approx(60.0, abs=0.02)})]   # third attempt: market
+    assert "BTC/USD" not in live.crypto_limits()
+
+
+def test_a_filled_limit_does_not_count_as_a_miss(env):
+    live = env["live"]
+    live.mark_dry_run_done()
+    live.save_crypto_limits({"BTC/USD": {"side": "buy", "tries": 2}})       # but nothing is still open
+    client = FakeTrendLive(holdings={"SPY": 0.2, "ETH/USD": 0.01, "SOL/USD": 0.0666667}, cash=60.0)
+    trend_run(env, client, "ma100", {"BTC/USD": UP, "ETH/USD": UP, "SOL/USD": UP})
+    assert client.sent[0][2].get("limit_price") == 59_990.0
+    assert live.crypto_limits()["BTC/USD"]["tries"] == 1
+
+
+def test_switching_off_still_cancels_leftover_bot_limits(env):
+    env["live"].mark_dry_run_done()
+    stale = LiveOrder(client_order_id="live-2026-08-24-ETH/USD-sell", ticker="ETH/USD", side="sell", status="new",
+                      qty=0.01, order_id="o2", order_type="limit", limit_price=3_100.0)
+    mine_today = stale.model_copy(update={"client_order_id": "live-2026-08-25-x", "order_id": "o3"})
+    someone_elses = stale.model_copy(update={"client_order_id": "manual-1", "order_id": "o4"})
+    client = FakeTrendLive(holdings=HELD, cash=0.0, open_orders=[stale, mine_today, someone_elses])
+    trend_run(env, client, "off", {})
+    assert client.cancelled == ["o2"]
+
+
+def test_dry_run_cancels_nothing_and_saves_no_tries(env):
+    stale = LiveOrder(client_order_id="live-2026-08-24-BTC/USD-buy", ticker="BTC/USD", side="buy", status="new",
+                      qty=0.001, order_id="o1", order_type="limit", limit_price=59_000.0)
+    client = FakeTrendLive(cash=200.0, open_orders=[stale])
+    result, _ = trend_run(env, client, "ma100", {"BTC/USD": UP, "ETH/USD": UP, "SOL/USD": UP}, dry_run=True)
+    assert result.status == "dry_run" and client.cancelled == [] and client.sent == []
+    assert any(o.limit_price for o in result.orders)
+    assert env["live"].crypto_limits() == {}
+
+
+def test_trend_needs_crypto_history(env):
+    env["live"].mark_dry_run_done()
+    s = LiveSettings(confirm_live=True, crypto_share=0.5, crypto_trend="ma100")
+    with pytest.raises(ValueError, match="history"):
+        submit_live(s, FakeTrendLive(cash=100.0), FakeDataClient(CLOSES), env["live"], env["paper"], now=MON,
+                    kill_path=env["kill"], crypto_marks=crypto_marks)
+
+
+def test_too_little_history_is_an_error_not_a_sell(env):
+    env["live"].mark_dry_run_done()
+    client = FakeTrendLive(holdings=HELD, cash=0.0)
+    with pytest.raises(ValueError, match="ETH/USD"):
+        trend_run(env, client, "ma100", {"BTC/USD": UP, "ETH/USD": UP[:50], "SOL/USD": UP})
+    assert client.sent == []

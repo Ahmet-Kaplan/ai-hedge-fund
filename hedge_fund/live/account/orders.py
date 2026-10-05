@@ -2,7 +2,8 @@
 
 Buys are dollar amounts (fractional shares), funded only by cash already in
 the account. Long sells are fractional quantities. Shorts and covers are
-whole shares. Sells are listed first.
+whole shares. Sells are listed first. Crypto orders can be turned into
+limits at the touch (`to_limits`) to pay the maker fee.
 """
 
 from __future__ import annotations
@@ -19,20 +20,23 @@ class PlannedOrder(BaseModel):
     ticker: str
     side: Literal["buy", "sell"]
     dollars: float | None = None   # notional buy
-    qty: float | None = None       # fractional long sell
+    qty: float | None = None       # fractional long sell, or a limit buy's quantity
     shares: int | None = None      # whole-share short / cover
+    limit_price: float | None = None   # set → a good-til-cancelled limit order
 
 
 def size_orders(
     holdings: dict[str, float], cash: float, marks: dict[str, float], target: dict[str, float], *,
     rebalance: bool, min_order_usd: float, min_trade_pct: float, cash_buffer_pct: float,
+    also_rebalance: set[str] = frozenset(),
 ) -> list[PlannedOrder]:
     """Orders that move `holdings` toward `target` (weights of equity).
 
     On a rebalance day every name is realigned (dust under the larger of
     min_order_usd and min_trade_pct of equity skipped, closes never skipped).
     Otherwise only uninvested cash is put to work, toward the most
-    underweight names. Buys never exceed cash × (1 − cash_buffer_pct).
+    underweight names; names in `also_rebalance` are realigned anyway. Buys
+    never exceed cash × (1 − cash_buffer_pct).
     """
     equity = cash + sum(q * marks[t] for t, q in holdings.items())
     if equity <= 0:
@@ -54,7 +58,7 @@ def size_orders(
             elif change > 0 and (target_shares == 0 or change * mark >= floor):
                 covers.append(PlannedOrder(ticker=t, side="buy", shares=change))
             continue
-        if delta < 0 and q > 0 and rebalance:
+        if delta < 0 and q > 0 and (rebalance or t in also_rebalance):
             closing = weight <= 0
             if closing or -delta >= floor:
                 sells.append(PlannedOrder(ticker=t, side="sell", qty=round(q if closing else min(q, -delta / mark), 9)))
@@ -73,6 +77,27 @@ def size_orders(
     return sells + covers + buys
 
 
+def to_limits(orders: list[PlannedOrder], quotes: dict[str, tuple[float, float]], *,
+              market: set[str]) -> list[PlannedOrder]:
+    """Crypto orders as limits at the touch: buys at the bid, sells at the ask.
+
+    A limit at the touch rests on the book, so it fills as a maker. Buy size is
+    dollars ÷ bid, rounded down to 1e-9. Names in `market`, and stocks, are unchanged.
+    """
+    out = []
+    for o in orders:
+        if "/" not in o.ticker or o.ticker in market or o.shares is not None:
+            out.append(o)
+            continue
+        bid, ask = quotes[o.ticker]
+        if o.side == "buy":
+            qty = math.floor(o.dollars / bid * 1e9) / 1e9
+            out.append(PlannedOrder(ticker=o.ticker, side="buy", qty=qty, limit_price=bid))
+        else:
+            out.append(PlannedOrder(ticker=o.ticker, side="sell", qty=o.qty, limit_price=ask))
+    return out
+
+
 def check_orders(
     orders: list[PlannedOrder], holdings: dict[str, float], cash: float, marks: dict[str, float],
     exempt: set[str], *, shorts_ok: bool, max_name: float,
@@ -82,7 +107,9 @@ def check_orders(
     Names in `exempt` (the stock core and the crypto core) skip the per-name cap.
     """
     equity = cash + sum(q * marks[t] for t, q in holdings.items())
-    spend = sum(o.dollars for o in orders if o.dollars) + sum(o.shares * marks[o.ticker] for o in orders if o.shares and o.side == "buy")
+    spend = (sum(o.dollars for o in orders if o.dollars)
+             + sum(o.shares * marks[o.ticker] for o in orders if o.shares and o.side == "buy")
+             + sum(o.qty * o.limit_price for o in orders if o.limit_price and o.side == "buy"))
     if spend > cash + 1e-6:
         raise ValueError(f"orders spend ${spend:,.2f} but the account has ${cash:,.2f} cash")
     projected = dict(holdings)
@@ -90,7 +117,7 @@ def check_orders(
         if o.dollars:
             change = o.dollars / marks[o.ticker]
         elif o.qty:
-            change = -o.qty
+            change = o.qty if o.side == "buy" else -o.qty
         else:
             change = o.shares if o.side == "buy" else -o.shares
         projected[o.ticker] = projected.get(o.ticker, 0.0) + change

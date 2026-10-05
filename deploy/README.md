@@ -80,6 +80,9 @@ If you installed the Mac schedule, remove it so runs don't double up:
   `paper+live` still needs the live keys, `confirm_live: true` in `live.yaml`
   and one completed live dry run — the setting alone can't trade real money.
 - **Edit `live.yaml`:** on the `state` branch in the GitHub web editor.
+- **Crypto trend (ma100):** `crypto_trend: shadow` reports in Telegram what
+  ma100 would do while still buying and holding; `crypto_trend: ma100` trades
+  it with limit orders; `off` is plain buy-and-hold.
 - **Pause:** `RUN_MODE=off`, or create a file named `KILL` on the `state` branch.
 - **Run now:** "Run workflow", optionally choosing a mode for that run.
 - **History:** every run commits the ledgers to the `state` branch.

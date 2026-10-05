@@ -8,17 +8,18 @@ and the plan is written to disk before the first order.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
 
 from pydantic import BaseModel, Field
 
 from hedge_fund.brokers.alpaca import LiveOrder
+from hedge_fund.crypto.rules import ma100
 from hedge_fund.data.protocol import DataClient
 from hedge_fund.data.sessions import NEW_YORK
 from hedge_fund.live.account.ledger import LiveLedger, LiveNavRow
-from hedge_fund.live.account.orders import PlannedOrder, check_orders, size_orders
+from hedge_fund.live.account.orders import PlannedOrder, check_orders, size_orders, to_limits
 from hedge_fund.live.account.settings import LiveSettings
 from hedge_fund.live.account.target import account_book, affordable_satellite, latest_paper_weights, target_book
 from hedge_fund.live.calendar import ORDER_CUTOFF, is_rebalance_day, ny_midnight
@@ -39,9 +40,16 @@ class LiveSubmitResult(BaseModel):
     target: dict[str, float] = Field(default_factory=dict)
     orders: list[PlannedOrder] = Field(default_factory=list)
     results: list[LiveOrder] = Field(default_factory=list)
+    trend: str = "off"
+    exposure: dict[str, int] = Field(default_factory=dict)        # ma100 per coin: 1 in, 0 out
+    shadow: list[PlannedOrder] = Field(default_factory=list)      # crypto orders ma100 would place
 
 
 CryptoMarks = Callable[[list[str], str], dict[str, float]]
+CryptoHistory = Callable[[list[str], str], dict[str, list[float]]]   # daily closes through a UTC day, oldest first
+CryptoQuotes = Callable[[list[str]], dict[str, tuple[float, float]]]  # (bid, ask) now
+MA_DAYS = 100
+MAX_LIMIT_TRIES = 2   # a third consecutive attempt goes at market (spec §15)
 
 
 def _is_crypto(ticker: str) -> bool:
@@ -108,6 +116,7 @@ def reconcile_live(settings: LiveSettings, client, data_client: DataClient, ledg
 def submit_live(
     settings: LiveSettings, client, data_client: DataClient, ledger: LiveLedger, paper: Ledger, *,
     now: datetime, dry_run: bool = False, kill_path: Path = KILL_PATH, crypto_marks: CryptoMarks | None = None,
+    crypto_history: CryptoHistory | None = None, crypto_quotes: CryptoQuotes | None = None,
 ) -> LiveSubmitResult:
     now = now.astimezone(NEW_YORK)
     session = now.date().isoformat()
@@ -136,6 +145,14 @@ def submit_live(
         raise ValueError("no completed session in the last 10 days to price the account")
     mark_day = previous[-1]
 
+    # The bot's crypto orders from earlier days that are still open: cancelled before sizing (in every
+    # mode, so switching ma100 off leaves nothing behind); a dry run only looks.
+    stale = [o for o in client.open_orders() if _is_crypto(o.ticker)
+             and o.client_order_id.startswith("live-") and not o.client_order_id.startswith(prefix)]
+    if stale and not dry_run:
+        client.cancel_orders([o.order_id for o in stale])
+    missed = {o.ticker: o.side for o in stale}
+
     holdings = client.holdings()
     cash = client.account().cash
     paper_weights, paper_session, fresh = latest_paper_weights(paper, session, settings.stale_plan_days)
@@ -158,25 +175,73 @@ def submit_live(
         satellite = _last_fresh_satellite(ledger) if share > 0 else {}
     target = account_book(target_book(satellite, core), settings)
     rebalance = not holdings or is_rebalance_day(session, mark_day, settings.rebalance)
-    orders = size_orders(holdings, cash, marks, target, rebalance=rebalance,
-                         min_order_usd=settings.min_order_usd, min_trade_pct=settings.min_trade_pct,
-                         cash_buffer_pct=settings.cash_buffer_pct)
+    sizing = dict(rebalance=rebalance, min_order_usd=settings.min_order_usd, min_trade_pct=settings.min_trade_pct,
+                  cash_buffer_pct=settings.cash_buffer_pct)
+
+    trend = settings.crypto_trend if crypto_core else "off"
+    exposure: dict[str, int] = {}
+    shadow: list[PlannedOrder] = []
+    trend_target, out_held = target, set()
+    if trend != "off":
+        if crypto_history is None:
+            raise ValueError("crypto_trend needs a crypto price history source")
+        signal_day = (now.astimezone(timezone.utc).date() - timedelta(days=1)).isoformat()
+        history = crypto_history(sorted(crypto_core), signal_day)
+        short = [c for c in sorted(crypto_core) if len(history.get(c, [])) < MA_DAYS]
+        if short:   # never read missing data as "below the average" and sell
+            raise ValueError(f"ma100 needs {MA_DAYS} daily closes through {signal_day}; too few for {', '.join(short)}")
+        exposure = {c: ma100(history[c]) for c in sorted(crypto_core)}
+        trend_target = {t: w * exposure.get(t, 1) for t, w in target.items()}
+        out_held = {c for c, e in exposure.items() if e == 0 and holdings.get(c, 0) > 0}
+    if trend == "ma100":
+        target = trend_target
+    orders = size_orders(holdings, cash, marks, target, also_rebalance=out_held if trend == "ma100" else set(), **sizing)
+    if trend == "shadow":
+        shadow = [o for o in size_orders(holdings, cash, marks, trend_target, also_rebalance=out_held, **sizing)
+                  if _is_crypto(o.ticker)]
+
+    quotes: dict[str, tuple[float, float]] = {}
+    limits: dict[str, dict] = {}
+    if trend == "ma100":
+        before = ledger.crypto_limits()
+        market = set()
+        for o in orders:
+            if not _is_crypto(o.ticker):
+                continue
+            prior = before.get(o.ticker)
+            tries = prior["tries"] + 1 if prior and prior["side"] == o.side and missed.get(o.ticker) == o.side else 1
+            if tries > MAX_LIMIT_TRIES:
+                market.add(o.ticker)
+            else:
+                limits[o.ticker] = {"side": o.side, "tries": tries}
+        if limits:
+            if crypto_quotes is None:
+                raise ValueError("ma100 limit orders need a crypto quote source")
+            quotes = crypto_quotes(sorted(limits))
+        orders = to_limits(orders, quotes, market=market)
     check_orders(orders, holdings, cash, marks, {core} | set(settings.crypto_core), shorts_ok=shorts_ok, max_name=settings.satellite_max_name_pct)
     payload = {"session": session, "rebalance": rebalance, "equity": equity, "cash": cash, "holdings": holdings,
                "marks": marks, "paper_plan": paper_session, "paper_fresh": fresh, "agent_share": share,
-               "satellite": satellite, "target": target, "orders": [o.model_dump() for o in orders], "results": []}
+               "satellite": satellite, "target": target, "crypto_trend": trend, "exposure": exposure,
+               "quotes": quotes, "shadow": [o.model_dump() for o in shadow],
+               "orders": [o.model_dump() for o in orders], "results": []}
+    trend_info = dict(trend=trend, exposure=exposure, shadow=shadow)
     if dry_run:
         ledger.write_plan(session, payload, dry_run=True)
         ledger.mark_dry_run_done()
-        return done("dry_run", f"{len(orders)} orders", target=target, orders=orders)
+        return done("dry_run", f"{len(orders)} orders", target=target, orders=orders, **trend_info)
+    if trend == "ma100" or ledger.crypto_limits():
+        ledger.save_crypto_limits(limits)
     if not orders:
-        return done("nothing_to_do", target=target)
+        return done("nothing_to_do", target=target, **trend_info)
 
     ledger.write_plan(session, payload)
     results: list[LiveOrder] = []
     for o in orders:
         cid = f"{prefix}{o.ticker}-{o.side}"
-        if o.dollars is not None:
+        if o.limit_price is not None:
+            results.append(client.limit_order(o.ticker, o.side, o.qty, o.limit_price, cid))
+        elif o.dollars is not None:
             results.append(client.buy_notional(o.ticker, o.dollars, cid))
         elif o.qty is not None:
             results.append(client.sell_qty(o.ticker, o.qty, cid))
@@ -185,7 +250,8 @@ def submit_live(
         payload["results"] = [r.model_dump() for r in results]
         ledger.write_plan(session, payload)
     rejected = sum(r.status == "rejected" for r in results)
-    return done("submitted", f"{len(results)} orders, {rejected} rejected", target=target, orders=orders, results=results)
+    return done("submitted", f"{len(results)} orders, {rejected} rejected", target=target, orders=orders, results=results,
+                **trend_info)
 
 
 def _last_fresh_satellite(ledger: LiveLedger) -> dict[str, float]:

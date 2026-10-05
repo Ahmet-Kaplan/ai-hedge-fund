@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from hedge_fund.live.account.settings import LiveSettings, load_settings, save_settings
 
@@ -38,3 +39,10 @@ def test_crypto_defaults_and_validation():
         LiveSettings(crypto_core={"BTC/USD": 0.5})
     with pytest.raises(ValueError, match="pair"):
         LiveSettings(crypto_core={"BTCUSD": 1.0})
+
+
+def test_crypto_trend_is_off_unless_chosen():
+    assert LiveSettings().crypto_trend == "off"
+    assert LiveSettings(crypto_trend="shadow").crypto_trend == "shadow"
+    with pytest.raises(ValidationError):
+        LiveSettings(crypto_trend="ma200")

@@ -17,6 +17,7 @@ from hedge_fund.data.models import Price
 from hedge_fund.data.store import MarketStore
 
 CRYPTO_BARS_URL = "https://data.alpaca.markets/v1beta3/crypto/us/bars"
+CRYPTO_QUOTES_URL = "https://data.alpaca.markets/v1beta3/crypto/us/latest/quotes"
 
 
 def pair(symbol: str) -> str:
@@ -55,6 +56,22 @@ class CryptoPriceSource:
             if not token:
                 return out
             params["page_token"] = token
+
+
+    def latest_quotes(self, symbols: list[str]) -> dict[str, tuple[float, float]]:
+        """(best bid, best ask) per pair, right now."""
+        try:
+            resp = self._session.get(CRYPTO_QUOTES_URL, params={"symbols": ",".join(symbols)}, timeout=self._timeout)
+        except requests.RequestException as exc:
+            raise DataSourceError(f"Alpaca crypto quotes: {exc}") from exc
+        if resp.status_code >= 400:
+            raise DataSourceError(f"Alpaca crypto quotes: HTTP {resp.status_code}: {resp.text[:200]}")
+        rows = resp.json().get("quotes") or {}
+        out = {s: (float(rows[s]["bp"]), float(rows[s]["ap"])) for s in symbols if s in rows}
+        bad = [s for s in symbols if s not in out or not 0 < out[s][0] < out[s][1]]
+        if bad:
+            raise DataSourceError(f"Alpaca crypto quotes: no usable bid/ask for {', '.join(bad)}")
+        return out
 
 
 def crypto_closes(store: MarketStore, source: CryptoPriceSource, symbols: list[str],

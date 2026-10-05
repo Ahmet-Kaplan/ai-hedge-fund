@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from hedge_fund.brokers.alpaca import AlpacaLiveClient
@@ -27,7 +27,7 @@ from hedge_fund.data.store import MarketStore
 from hedge_fund.live.account.ledger import LiveLedger
 from hedge_fund.live.account.report import build_live_report
 from hedge_fund.live.account.review import apply_review, propose_review
-from hedge_fund.live.account.runner import reconcile_live, submit_live
+from hedge_fund.live.account.runner import MA_DAYS, LiveSubmitResult, reconcile_live, submit_live
 from hedge_fund.live.account.settings import LiveSettings, load_settings, save_settings
 from hedge_fund.live.launchd import notify
 from hedge_fund.live.ledger import Ledger
@@ -102,6 +102,46 @@ def _crypto_marks(names: list[str], day: str) -> dict[str, float]:
     return {n: closes[n][day] for n in names}
 
 
+def _crypto_history(names: list[str], day: str) -> dict[str, list[float]]:
+    """Daily closes through the UTC day `day`, oldest first — enough for ma100."""
+    start = (date.fromisoformat(day) - timedelta(days=MA_DAYS + 60)).isoformat()
+    closes = crypto_closes(MarketStore(MARKET_DB_PATH), CryptoPriceSource(), names, start, day)
+    missing = [n for n in names if day not in closes[n]]
+    if missing:   # a stale history would give a stale signal
+        raise ValueError(f"no crypto close on {day} for {', '.join(missing)}")
+    return {n: [closes[n][d] for d in sorted(closes[n])] for n in names}
+
+
+def _crypto_quotes(names: list[str]) -> dict[str, tuple[float, float]]:
+    return CryptoPriceSource().latest_quotes(names)
+
+
+def _order_text(o) -> str:
+    if o.limit_price is not None:
+        return f"{o.qty:g} limit @ {o.limit_price:,.2f}"
+    if o.dollars is not None:
+        return f"${o.dollars:,.2f}"
+    if o.qty is not None:
+        return f"{o.qty:g}" if "/" in o.ticker else f"{o.qty:g} sh"
+    return f"{o.shares} sh"
+
+
+def submit_lines(result: LiveSubmitResult) -> list[str]:
+    """What `submit` prints. The crypto trend lines come last, so a trimmed summary still shows them."""
+    lines = [f"{result.session}: {result.status} {result.detail}"]
+    lines += [f"  target {t:6} {w:+.1%}" for t, w in sorted(result.target.items(), key=lambda kv: -abs(kv[1]))]
+    lines += [f"  {o.side:4} {o.ticker:6} {_order_text(o)}" for o in result.orders]
+    lines += [f"  REJECTED {r.ticker}: {r.reason}" for r in result.results if r.status == "rejected"]
+    if result.trend != "off":
+        coins = " · ".join(f"{c.split('/')[0]} {'in' if e else 'OUT'}" for c, e in result.exposure.items())
+        if result.trend == "shadow":
+            lines.append(f"crypto ma100 (shadow, not trading): {coins}")
+            lines += [f"  would {o.side} {o.ticker} {_order_text(o)}" for o in result.shadow] or ["  would place no crypto orders"]
+        else:
+            lines.append(f"crypto ma100: {coins}")
+    return lines
+
+
 def _reconcile(args, settings, path, ledger) -> int:
     client = AlpacaLiveClient()
     session = session_to_reconcile(client, datetime.now(NEW_YORK))
@@ -117,16 +157,8 @@ def _submit(args, settings, path, ledger) -> int:
     with open_data_client() as data:
         result = submit_live(settings, client, data, ledger, Ledger.for_fund(settings.paper_fund),
                              now=datetime.now(NEW_YORK), dry_run=args.dry_run, kill_path=KILL_PATH,
-                             crypto_marks=_crypto_marks)
-    print(f"{result.session}: {result.status} {result.detail}")
-    for t, w in sorted(result.target.items(), key=lambda kv: -abs(kv[1])):
-        print(f"  target {t:6} {w:+.1%}")
-    for o in result.orders:
-        what = f"${o.dollars:,.2f}" if o.dollars is not None else (f"{o.qty:g} sh" if o.qty is not None else f"{o.shares} sh")
-        print(f"  {o.side:4} {o.ticker:6} {what}")
-    for r in result.results:
-        if r.status == "rejected":
-            print(f"  REJECTED {r.ticker}: {r.reason}")
+                             crypto_marks=_crypto_marks, crypto_history=_crypto_history, crypto_quotes=_crypto_quotes)
+    print("\n".join(submit_lines(result)))
     return 0
 
 
@@ -141,7 +173,8 @@ def _run(args, settings, path, ledger) -> int:
 def _status(args, settings, path, ledger) -> int:
     account = AlpacaLiveClient().account()
     print(f"live account {account.status} · equity ${account.equity:,.2f} · cash ${account.cash:,.2f}")
-    print(f"crypto half {settings.crypto_share:.0%} ({', '.join(f'{t} {w:.0%}' for t, w in settings.crypto_core.items())})")
+    print(f"crypto half {settings.crypto_share:.0%} ({', '.join(f'{t} {w:.0%}' for t, w in settings.crypto_core.items())})"
+          f" · trend {settings.crypto_trend}")
     print(f"core {settings.core_ticker} · agent share {settings.agent_share:.0%} · shorts "
           f"{'on' if settings.shorts_enabled else 'off'} · confirm_live {settings.confirm_live}")
     print(f"kill switch {'ON' if KILL_PATH.exists() else 'off'} · satellite halted: {ledger.satellite_halted()}"

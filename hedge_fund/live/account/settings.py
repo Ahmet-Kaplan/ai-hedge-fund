@@ -34,6 +34,9 @@ class LiveSettings(BaseModel):
     crypto_core: dict[str, float] = Field(
         default_factory=lambda: {"BTC/USD": 0.6, "ETH/USD": 0.3, "SOL/USD": 0.1},
         description="crypto half's buy-and-hold weights (Alpaca pairs)")
+    crypto_trend: Literal["off", "shadow", "ma100"] = Field(
+        default="off", description="ma100: hold a coin only above its 100-day average, via limit orders; "
+                                   "shadow: report what ma100 would do, trade buy-and-hold")
 
     @field_validator("crypto_core")
     @classmethod
