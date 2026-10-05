@@ -279,3 +279,28 @@ not looser:
 - Pass → build limit-order execution for crypto in `aihf-live`, then the
   rule as a live setting, paper-checked first. Fail → buy-and-hold stays and
   the trend-rule line of work is closed.
+
+### 14a. Results (2026-10-05)
+
+2021-07-20 → 2026-10-04, 60/30/10, §3 execution.
+
+| Variant | 15 bps: Total | Sharpe H1 / H2 | Max DD | Fees | 20 bps: Total | Sharpe H1 / H2 | Passes both |
+|---|---|---|---|---|---|---|---|
+| Core | +247% | 0.43 / 0.81 | 79.2% | 2.0% | +246% | 0.43 / 0.81 | — |
+| **ma100** | **+319%** | **0.45 / 1.15** | **49.4%** | 17.8% | **+308%** | **0.44 / 1.15** | **YES** |
+| mom12w | +138% | 0.08 / 1.03 | 57.5% | 10.8% | +133% | 0.07 / 1.02 | no |
+| ma_cross | +193% | 0.78 / 0.72 | 45.4% | 3.3% | +191% | 0.77 / 0.72 | no (H2) |
+| td1 | +231% | 0.30 / 1.07 | 53.0% | 10.9% | +225% | 0.29 / 1.06 | no (H1) |
+| td2 | +246% | 0.40 / 1.06 | 47.3% | 18.4% | +236% | 0.38 / 1.05 | no (H1) |
+| band10 | +236% | 0.42 / 0.81 | 79.3% | 1.4% | +235% | 0.42 / 0.81 | no |
+| band20 | +244% | 0.42 / 0.82 | 79.3% | 1.1% | +243% | 0.42 / 0.82 | no |
+
+Verdict: **ma100 passes** (each coin held only while its close is above its
+100-day average, else that slice sits in cash). Its edge over holding is
+large in 2023–26 and in drawdown (49% vs 79%), but in the 2021–mid-2023 half
+it is a near-tie (Sharpe 0.45 / 0.44 vs 0.43): the case for it is "same
+return in the bad years, far smaller crash", not "beats the market every
+year". Its fee drag (18–23% of starting capital over five years) means it
+works only with limit (maker) orders — at 25 bps taker it failed (§11).
+Next, per the pre-registration: limit-order execution for crypto in
+`aihf-live`, then ma100 as a live setting, paper-checked first.
