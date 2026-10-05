@@ -304,3 +304,34 @@ year". Its fee drag (18–23% of starting capital over five years) means it
 works only with limit (maker) orders — at 25 bps taker it failed (§11).
 Next, per the pre-registration: limit-order execution for crypto in
 `aihf-live`, then ma100 as a live setting, paper-checked first.
+
+## 15. ma100 + limit orders in the live account (design, 2026-10-05)
+
+User decisions: unfilled limits are re-placed, then sent at market after two
+days; one week of shadow running before switching on.
+
+- **Setting** `crypto_trend: off | shadow | ma100` in `live.yaml` (default
+  `off`; only matters when `crypto_share > 0`).
+- **Signal**: for each coin, ma100 on free Alpaca UTC daily closes through
+  the last completed UTC day (yesterday at the 08:00 UTC run). In → the
+  coin's normal 60/30/10 target; out → target 0, its slice stays in cash
+  (never moved to the other coins or to stocks).
+- **When it trades**: Mondays realign everything, as now. On other days, a
+  coin that is out but still held is sold (the backtest trades the day a
+  decision changes); a coin that is in is bought from cash by the normal
+  cash pass, which is where the out-coin's proceeds sit.
+- **Limit orders (`ma100` only)**: every crypto order is a good-til-cancelled
+  limit at the touch — buys at the best bid, sells at the best ask (free
+  Alpaca latest quotes) — so it rests on the book and pays the 15 bps maker
+  fee. Buy size = dollars ÷ bid, rounded down to 1e-9.
+- **Unfilled**: each run first cancels the bot's still-open crypto orders
+  from earlier days (in every mode, so switching off leaves nothing behind),
+  then sizes from the account as it stands. A coin whose last order was
+  cancelled unfilled and that still needs the same side counts a retry; the
+  third consecutive attempt (two days missed) goes at market (25 bps).
+  Attempts are kept in `live/main/crypto_limits.json`.
+- **Shadow**: orders are buy-and-hold as today; the run additionally prints
+  ma100's in/out per coin and the crypto orders it would place, as the last
+  lines of the output (so they show in Telegram).
+- **Plan file** records the exposures, quotes and order types.
+- Out of scope: post-only orders (Alpaca crypto has none), intraday checks.
