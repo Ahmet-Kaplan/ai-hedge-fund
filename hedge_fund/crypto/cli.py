@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from hedge_fund.crypto.backtest import passes_bar, passes_rebalance_bar, run_backtest, split_metrics
 from hedge_fund.crypto.rules import RULES, WARMUP_DAYS
-from hedge_fund.data.crypto_prices import CryptoPriceSource, crypto_closes
+from hedge_fund.data.crypto_prices import CryptoPriceSource, crypto_bars
 from hedge_fund.data.store import MarketStore
 from hedge_fund.paths import CRYPTO_DIR, MARKET_DB_PATH
 
@@ -35,11 +35,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def evaluate(closes: dict[str, dict[str, float]], *, fee_bps: float, end: str) -> list[dict]:
+def evaluate(closes: dict[str, dict[str, float]], *, fee_bps: float, end: str,
+             highs: dict | None = None, lows: dict | None = None) -> list[dict]:
     first = min(min(c) for c in closes.values())
     start = (date.fromisoformat(first) + timedelta(days=WARMUP_DAYS)).isoformat()
     variants = {"core": None, **RULES}
-    results = {name: run_backtest(closes, CORE_WEIGHTS, rule, fee_bps=fee_bps, start=start, end=end)
+    results = {name: run_backtest(closes, CORE_WEIGHTS, rule, fee_bps=fee_bps, start=start, end=end,
+                                  highs=highs, lows=lows)
                for name, rule in variants.items()}
     results.update({name: run_backtest(closes, CORE_WEIGHTS, None, fee_bps=fee_bps, start=start, end=end, band=b)
                     for name, b in BANDS.items()})
@@ -61,8 +63,8 @@ def evaluate(closes: dict[str, dict[str, float]], *, fee_bps: float, end: str) -
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     end = args.end or (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
-    closes = crypto_closes(MarketStore(MARKET_DB_PATH), CryptoPriceSource(), list(CORE_WEIGHTS), DATA_START, end)
-    table = evaluate(closes, fee_bps=args.fee_bps, end=end)
+    closes, highs, lows = crypto_bars(MarketStore(MARKET_DB_PATH), CryptoPriceSource(), list(CORE_WEIGHTS), DATA_START, end)
+    table = evaluate(closes, fee_bps=args.fee_bps, end=end, highs=highs, lows=lows)
     print(f"crypto backtest {table[0]['start']} → {table[0]['end']} · 60/30/10 BTC/ETH/SOL · "
           f"{args.fee_bps:g} bps per side · halves split {SPLIT}")
     print(f"{'variant':10} {'total':>9} {'annual':>8} {'sharpe':>7} {'1st half':>9} {'2nd half':>9} {'max dd':>7} {'fees':>6}  passes bar?")

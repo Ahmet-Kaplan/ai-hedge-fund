@@ -38,6 +38,7 @@ class CryptoBacktest(BaseModel):
 def run_backtest(
     closes: dict[str, dict[str, float]], weights: dict[str, float], rule: Rule | None, *,
     fee_bps: float, start: str, end: str, capital: float = 10_000.0, band: float | None = None,
+    highs: dict[str, dict[str, float]] | None = None, lows: dict[str, dict[str, float]] | None = None,
 ) -> CryptoBacktest:
     """With `band`, there is no Monday rebalance: each weekday the basket is
     rebalanced only if some coin's weight is more than `band` away from its
@@ -47,6 +48,15 @@ def run_backtest(
     days = [d for d in all_days if start <= d <= end]
     history = {s: [closes[s][d] for d in all_days] for s in symbols}
     index = {d: i for i, d in enumerate(all_days)}
+    precomputed: dict[str, list[float]] | None = None
+    if rule is not None and hasattr(rule, "series"):   # one pass over each coin's history
+        if getattr(rule, "needs_ohlc", False):
+            if highs is None or lows is None:
+                raise ValueError("this rule needs daily highs and lows")
+            precomputed = {s: rule.series(history[s], [highs[s][d] for d in all_days], [lows[s][d] for d in all_days])
+                           for s in symbols}
+        else:
+            precomputed = {s: rule.series(history[s]) for s in symbols}
     fee = fee_bps / 10_000
     units = dict.fromkeys(symbols, 0.0)
     cash = capital
@@ -57,7 +67,14 @@ def run_backtest(
     for day in days:
         i = index[day]
         if date.fromisoformat(day).weekday() < 5:          # weekdays only, like the live run
-            exposure = {s: (1 if rule is None else (rule(history[s][:i]) if i > 0 else 0)) for s in symbols}
+            if rule is None:
+                exposure = dict.fromkeys(symbols, 1)
+            elif i == 0:
+                exposure = dict.fromkeys(symbols, 0)
+            elif precomputed is not None:
+                exposure = {s: precomputed[s][i - 1] for s in symbols}   # decided at the previous close
+            else:
+                exposure = {s: rule(history[s][:i]) for s in symbols}
             if band is not None:
                 value_now = cash + sum(units[s] * history[s][i] for s in symbols)
                 due = held_exposure is None or any(

@@ -70,3 +70,16 @@ def crypto_closes(store: MarketStore, source: CryptoPriceSource, symbols: list[s
         first = min([start] + ([synced[0]] if synced else []))
         store.set_price_range(symbol, first, max(end, synced[1]) if synced else end)
     return {s: {p.time[:10]: p.close for p in store.prices(s, start, end)} for s in symbols}
+
+
+def crypto_bars(store: MarketStore, source: CryptoPriceSource, symbols: list[str], start: str, end: str
+                ) -> tuple[dict[str, dict[str, float]], dict[str, dict[str, float]], dict[str, dict[str, float]]]:
+    """(closes, highs, lows) per pair per UTC day — synced like crypto_closes."""
+    crypto_closes(store, source, symbols, start, end)
+    closes, highs, lows = {}, {}, {}
+    for s in symbols:
+        bars = store.prices(s, start, end)
+        closes[s] = {p.time[:10]: p.close for p in bars}
+        highs[s] = {p.time[:10]: p.high for p in bars}
+        lows[s] = {p.time[:10]: p.low for p in bars}
+    return closes, highs, lows

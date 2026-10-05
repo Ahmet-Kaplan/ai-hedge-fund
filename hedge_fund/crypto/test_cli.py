@@ -11,7 +11,7 @@ def test_evaluate_runs_core_and_every_rule():
     import math
     closes = {s: {d: 100 * (1 + 0.3 * math.sin(i / 40)) for i, d in enumerate(days("2021-01-01", 1200))}
               for s in CORE_WEIGHTS}
-    table = evaluate(closes, fee_bps=25, end=days("2021-01-01", 1200)[-1])
-    assert [row["variant"] for row in table] == ["core", "ma100", "mom12w", "ma_cross", "band10", "band20"]
+    table = evaluate(closes, fee_bps=25, end=days("2021-01-01", 1200)[-1], highs=closes, lows=closes)
+    assert [row["variant"] for row in table] == ["core", "ma100", "mom12w", "ma_cross", "td1", "td2", "band10", "band20"]
     assert table[0]["passes"] is None and all(isinstance(r["passes"], bool) for r in table[1:])
     assert table[0]["start"] == "2021-07-20"                       # first day + 200
