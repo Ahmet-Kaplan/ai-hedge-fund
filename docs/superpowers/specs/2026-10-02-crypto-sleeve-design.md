@@ -242,3 +242,19 @@ their Pine source, transcribed with published parameters:
 Both run per coin inside the 60/30/10 sleeve with the §3 execution (weekday
 trading, decision from the previous close), 25 bps per side, and the §3 bar.
 Their published results used 0.05% fees on Bybit perpetuals and BTC only.
+
+### 13a. Results (2026-10-05)
+
+2021-07-20 → 2026-10-04, 60/30/10, 25 bps per side, §3 execution and bar.
+
+| Variant | Total | Annual | Sharpe | Sharpe H1 | Sharpe H2 | Max DD | Fees | Passes |
+|---|---|---|---|---|---|---|---|---|
+| Core | +245% | +26.9% | 0.65 | 0.43 | 0.81 | 79.2% | 3.4% | — |
+| td1 (A2 breakout) | +219% | +24.9% | 0.75 | 0.28 | 1.05 | 53.5% | 17.8% | no (H1) |
+| td2 (TSMOM vote, long-only) | +226% | +25.5% | 0.78 | 0.35 | 1.04 | 48.1% | 29.6% | no (H1) |
+
+Verdict: neither passes. Like every trend rule here (now 5 of 5), they cut
+the 2022 drawdown sharply and beat holding in 2023–26, but lose in the
+2021–mid-2023 half after whipsaw and Alpaca's 25 bps fees. Their trader.dev
+results (BTC only, from the 2020 low, 0.05% fees, td2 with shorts on perps)
+do not carry over to this account. The crypto half stays buy-and-hold.
