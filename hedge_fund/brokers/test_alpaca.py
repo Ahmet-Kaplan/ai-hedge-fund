@@ -63,7 +63,7 @@ class _RawClock:
 @dataclass
 class _RawOrder:
     id: str
-    status: str
+    status: object
     filled_qty: str = "0"
     filled_avg_price: str | None = None
 
@@ -615,3 +615,60 @@ class TestLiveKeysAreSeparate:
         settings = AlpacaSettings.from_env()
         assert settings.refuse_reason() is not None            # trading not enabled
         assert "ALPACA_TRADING_ENABLED" in settings.refuse_reason()
+
+
+# ---------------------------------------------------------------------------
+# The SDK returns enums, not words
+# ---------------------------------------------------------------------------
+
+class _SdkStatus:
+    """What alpaca-py actually returns: an enum whose str() is qualified.
+
+    `str(OrderStatus.FILLED)` is "orderstatus.filled", not "filled". A fake
+    that returns the bare word models the wrong thing and hides the bug — which
+    is exactly what happened: a real filled order was reported as a timeout and
+    the run aborted after the venue had already moved.
+    """
+
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+    def __str__(self) -> str:          # the qualified form the SDK prints
+        return f"orderstatus.{self.value}"
+
+
+def test_a_filled_enum_is_recognised_as_filled():
+    pytest.importorskip("alpaca")
+    client = FakeClient(order_script=[
+        _RawOrder("ord-1", _SdkStatus("accepted"), "0", None),
+        _RawOrder("ord-1", _SdkStatus("filled"), "12", "525.18"),
+    ])
+
+    fill = _broker(client).place_order(
+        Order(ticker="MSFT", side="sell", quantity=12, price=525.18)
+    )
+
+    assert fill.quantity == 12
+    assert fill.price == pytest.approx(525.18)
+
+
+def test_a_cancelled_enum_is_reported_as_cancelled_not_as_a_timeout():
+    pytest.importorskip("alpaca")
+    client = FakeClient(order_script=[
+        _RawOrder("ord-1", _SdkStatus("accepted"), "0", None),
+        _RawOrder("ord-1", _SdkStatus("canceled"), "0", None),
+    ])
+
+    with pytest.raises(AlpacaOrderError, match="ended canceled"):
+        _broker(client).place_order(Order(ticker="AAPL", side="buy", quantity=1, price=1.0))
+
+
+def test_the_status_normaliser_handles_every_shape():
+    """One place decides what a status means, so nothing re-guesses it."""
+    from hedge_fund.brokers.alpaca import _order_status
+
+    assert _order_status(_SdkStatus("filled")) == "filled"
+    assert _order_status("FILLED") == "filled"
+    assert _order_status("orderstatus.partially_filled") == "partially_filled"
+    assert _order_status(None) == ""
+    assert _order_status("") == ""

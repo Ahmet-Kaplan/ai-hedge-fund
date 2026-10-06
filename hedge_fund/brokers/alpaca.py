@@ -429,7 +429,7 @@ class AlpacaBroker:
                 "side": str(o.side),
                 "quantity": float(o.qty),
                 "filled_quantity": float(o.filled_qty or 0),
-                "status": str(o.status),
+                "status": _order_status(o.status),
             }
             for o in orders
         ]
@@ -499,7 +499,7 @@ class AlpacaBroker:
         deadline = self._monotonic() + self._settings.fill_timeout_seconds
         latest = submitted
         while True:
-            status = str(getattr(latest, "status", "")).lower()
+            status = _order_status(getattr(latest, "status", None))
             filled_qty = float(getattr(latest, "filled_qty", 0) or 0)
             avg_price = getattr(latest, "filled_avg_price", None)
 
@@ -578,6 +578,26 @@ def _hhmm(value: Any) -> str:
     if hasattr(value, "strftime"):
         return value.strftime("%H:%M")
     return str(value)[:5]
+
+
+def _order_status(raw: Any) -> str:
+    """The bare status word, whatever shape the SDK hands back.
+
+    Alpaca returns an enum, and `str(OrderStatus.FILLED)` is
+    `"orderstatus.filled"` — not `"filled"`. Comparing the raw string against
+    `"filled"` therefore never matches, so a completely filled order fell
+    through to the timeout branch and was reported as unfilled while the venue
+    had already moved. Cancelled orders were mis-reported the same way.
+
+    Found by placing a real order on the paper account: the run aborted with
+    "was not completely filled within 15s (status orderstatus.filled, 12/12
+    filled)". The tests had missed it because their fake returned a plain
+    string, which is exactly the shape the SDK does *not* produce.
+    """
+    value = getattr(raw, "value", raw)      # enum → its value
+    if value is None:
+        return ""
+    return str(value).rsplit(".", 1)[-1].strip().lower()
 
 
 def _require_alpaca() -> None:
