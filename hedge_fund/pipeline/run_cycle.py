@@ -42,6 +42,7 @@ from hedge_fund.pipeline.models import (
     CycleRecord,
     DecisionRecord,
     DroppedOutput,
+    ExecutionSlippage,
     PendingRunResult,
     StrategyRecord,
     TickerSkip,
@@ -190,6 +191,7 @@ def execute_decision(
     allocator: Allocator | None = None,
     reference: LedgerReference | None = None,
     require_settled_broker: bool = True,
+    live: bool = False,
 ) -> CycleRecord:
     """Refresh views before sizing a complete rebalance at exact closing prices.
 
@@ -199,15 +201,30 @@ def execute_decision(
     `require_settled_broker` refuses to trade while the venue still holds
     unfilled orders: its positions do not include them yet, so sizing from
     that book would re-issue the same trade as a second order.
+
+    `live` submits now instead of waiting for a session to end. There is no
+    later close to refresh against — the assessment is *at* the newest
+    completed close, which is the freshest point-in-time data that exists — so
+    `session` prices the orders rather than following them. The gap between that
+    price and what the venue charges is real and is recorded: see `slippage`.
     """
-    if session <= original.as_of or session > completed_through():
-        raise ValueError(f"execution session {session} must follow {original.as_of} and be complete")
     if fund.spec != original.spec:
         raise ValueError("fund mandate changed after assessment; create a new assessment")
-    cutoff = previous_day(session)
-    effective = original if cutoff == original.as_of else assess_fund(
-        fund, cutoff, data_client, original.universe, allocator,
-    )
+    if live:
+        if session != original.as_of:
+            raise ValueError(
+                f"a live run prices from its own assessment close: {session} != {original.as_of}"
+            )
+        if session > completed_through():
+            raise ValueError(f"live pricing session {session} is not complete")
+        effective = original
+    else:
+        if session <= original.as_of or session > completed_through():
+            raise ValueError(f"execution session {session} must follow {original.as_of} and be complete")
+        cutoff = previous_day(session)
+        effective = original if cutoff == original.as_of else assess_fund(
+            fund, cutoff, data_client, original.universe, allocator,
+        )
     spec = effective.spec
     # The slices were pinned when the assessment was built (and validated
     # there); re-validate the rest of the book against them rather than
@@ -274,7 +291,9 @@ def execute_decision(
         nav=cash + sum(shares * marks[t] for t, shares in positions.items()),
         original_assessment=original.model_copy(deep=True),
         refreshed_assessment=effective.model_copy(deep=True),
-        execution_as_of=session, execution_policy="next_close",
+        execution_as_of=session,
+        execution_policy="live_now" if live else "next_close",
+        slippage=_slippage(orders, fills),
         reconciliation=reconciliation,
         preflight=preflight_report,
     )
@@ -286,10 +305,24 @@ def run_cycle(
     allocator: Allocator | None = None,
     reference: LedgerReference | None = None,
     require_settled_broker: bool = True,
+    live: bool = False,
 ) -> CycleRecord | PendingRunResult:
-    """Assess at the effective cutoff and execute only on a later completed session."""
+    """Assess at the effective cutoff and execute only on a later completed session.
+
+    With `live=True` there is nothing to wait for: the assessment is at the
+    newest completed close and the orders go to the venue now. A live run
+    therefore never returns `PendingRunResult` — refusing to trade because a
+    future session has not happened yet is the backtest's rule, not the
+    market's.
+    """
     as_of = min(_date.fromisoformat(as_of).isoformat(), completed_through())
     proposal = assess_fund(fund, as_of, data_client, universe, allocator)
+    if live:
+        return execute_decision(
+            fund, proposal, as_of, broker, data_client, allocator,
+            reference=reference, require_settled_broker=require_settled_broker,
+            live=True,
+        )
     start = (_date.fromisoformat(as_of) + timedelta(days=1)).isoformat()
     closes = session_closes(data_client, fund.spec.benchmark, start, completed_through())
     if not closes:
@@ -358,6 +391,25 @@ def _volatilities(tickers: list[str], as_of: str, data_client: DataClient) -> di
         returns = [later / earlier - 1 for earlier, later in zip(closes, closes[1:]) if earlier > 0]
         if len(returns) >= _VOL_MIN_RETURNS:
             out[ticker] = statistics.stdev(returns) * math.sqrt(252)
+    return out
+
+
+def _slippage(orders: list[Order], fills: list[Fill]) -> list[ExecutionSlippage]:
+    """What each fill cost against the price its order was sized on.
+
+    Positive is worse for the fund either way: paid more to buy, received less
+    to sell. The in-process books fill at the reference price, so this is all
+    zero for a backtest — which is the point. A backtest cannot see this cost,
+    and a live run must not hide it.
+    """
+    out: list[ExecutionSlippage] = []
+    for order, fill in zip(orders, fills):
+        per_share = (fill.price - order.price) if order.side == "buy" else (order.price - fill.price)
+        out.append(ExecutionSlippage(
+            ticker=fill.ticker, side=fill.side, quantity=fill.quantity,
+            reference_price=order.price, fill_price=fill.price,
+            per_share=per_share, notional=per_share * fill.quantity,
+        ))
     return out
 
 

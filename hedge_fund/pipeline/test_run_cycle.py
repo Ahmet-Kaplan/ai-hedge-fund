@@ -17,7 +17,7 @@ from hedge_fund.fund.allocator import (
 from hedge_fund.fund.spec import Fund, FundSpec
 from hedge_fund.llm import PromptCache
 from hedge_fund.models import Signal
-from hedge_fund.pipeline.models import CycleRecord
+from hedge_fund.pipeline.models import CycleRecord, PendingRunResult
 from hedge_fund.pipeline.run_cycle import assess_fund, run_cycle
 from hedge_fund.signals import BuffettAgent, MungerAgent
 
@@ -856,3 +856,109 @@ def test_an_unknown_sizing_mode_is_rejected():
     with pytest.raises(ValidationError):
         _spec(strategies=[{"name": "solo", "models": [{"name": "a"}],
                            "blend": {"mode": "long_short", "sizing": "risk_parity"}}])
+
+
+# ---------------------------------------------------------------------------
+# Live execution: priced from the newest close, sent now
+# ---------------------------------------------------------------------------
+
+class SlippingBroker:
+    """A venue that charges a different price than the one the fund sized on.
+
+    Which is every real venue. The in-process books fill at the reference price
+    by construction, so they cannot exercise the path that reports the gap.
+    """
+
+    def __init__(self, cash: float, *, drift: float) -> None:
+        from hedge_fund.brokers.sim import SimBroker
+
+        self._inner = SimBroker(cash=cash)
+        self._drift = drift
+
+    def positions(self):
+        return self._inner.positions()
+
+    def cash(self) -> float:
+        return self._inner.cash()
+
+    def place_order(self, order):
+        filled = self._inner.place_order(
+            order.model_copy(update={"price": order.price * (1 + self._drift)})
+        )
+        return filled.model_copy(update={"price": filled.price / (1 + self._drift) * (1 + self._drift)})
+
+
+def _live_fund(views=None):
+    return Fund(_spec(), models={"solo": [FakeAnalyst("a", views=views or {"AAPL": 1.0})]})
+
+
+def test_a_live_run_trades_now_instead_of_waiting_for_a_close():
+    """The next completed session is always in the future, so the backtest's
+    next-close rule refuses to trade during every session. A live run cannot
+    use it."""
+    from hedge_fund.data.sessions import completed_through
+
+    today = _date.today().isoformat()
+    record = run_cycle(_live_fund(), today, SimBroker(cash=100_000.0),
+                       FakeDataClient(CLOSES), UNIVERSE, live=True)
+
+    assert not isinstance(record, PendingRunResult)
+    assert record.execution_policy == "live_now"
+    # Priced at the newest *completed* close — yesterday, not today. Today's own
+    # close does not exist yet, which is exactly why the next-close rule could
+    # never fire during a session.
+    assert record.execution_as_of == completed_through()
+    assert record.execution_as_of < today
+
+
+def test_a_live_run_prices_from_its_own_assessment_close():
+    """`session` must be the assessment date: a live order is sized on the
+    newest completed close, not on a session that has not happened."""
+    from hedge_fund.pipeline.run_cycle import execute_decision
+
+    as_of = _date.today().isoformat()
+    record = run_cycle(_live_fund(), as_of, SimBroker(cash=100_000.0),
+                       FakeDataClient(CLOSES), UNIVERSE, live=True)
+
+    with pytest.raises(ValueError, match="prices from its own assessment close"):
+        execute_decision(_live_fund(), record.original_assessment, "1999-01-01",
+                         SimBroker(cash=100_000.0), FakeDataClient(CLOSES), live=True)
+
+
+def test_the_receipt_records_what_the_venue_charged_against_the_close():
+    as_of = _date.today().isoformat()
+    record = run_cycle(_live_fund(), as_of, SlippingBroker(cash=100_000.0, drift=0.01),
+                       FakeDataClient(CLOSES), UNIVERSE, live=True)
+
+    assert record.orders and record.slippage
+    for slip in record.slippage:
+        assert slip.fill_price == pytest.approx(slip.reference_price * 1.01)
+        assert slip.per_share > 0                      # a buy paid more
+        assert slip.notional == pytest.approx(slip.per_share * slip.quantity)
+
+
+def test_slippage_is_signed_so_positive_is_always_worse():
+    from hedge_fund.brokers.models import Fill, Order
+    from hedge_fund.pipeline.run_cycle import _slippage
+
+    worse_buy, worse_sell = (
+        _slippage([Order(ticker="A", side="buy", quantity=10, price=100.0)],
+                  [Fill(ticker="A", side="buy", quantity=10, price=101.0)]),
+        _slippage([Order(ticker="A", side="sell", quantity=10, price=100.0)],
+                  [Fill(ticker="A", side="sell", quantity=10, price=99.0)]),
+    )
+
+    assert worse_buy[0].per_share == pytest.approx(1.0)      # paid more
+    assert worse_sell[0].per_share == pytest.approx(1.0)     # received less
+
+
+def test_the_in_process_books_report_no_slippage():
+    """Which is the cost a backtest cannot see — and the reason a live run has
+    to report it rather than assume it away."""
+    as_of = _date.today().isoformat()
+
+    record = run_cycle(_live_fund(), as_of, SimBroker(cash=100_000.0),
+                       FakeDataClient(CLOSES), UNIVERSE, live=True)
+
+    assert record.slippage
+    assert all(s.per_share == 0 and s.notional == 0 for s in record.slippage)

@@ -282,6 +282,7 @@ class CycleObserver:
         run_cycle_fn: Callable[..., CycleRecord | PendingRunResult] | None = None,
         reference: Any = None,
         require_settled_broker: bool = True,
+        live: bool = False,
     ) -> CycleRecord:
         """Run one cycle under this observer. Re-raises whatever the cycle raises."""
         cycle = run_cycle_fn or run_cycle
@@ -306,6 +307,8 @@ class CycleObserver:
                 extra["reference"] = reference
             if require_settled_broker is not True:
                 extra["require_settled_broker"] = require_settled_broker
+            if live:
+                extra["live"] = live
             record = cycle(fund, as_of, broker, data_client, universe, **extra)
         except Exception as exc:
             failed = _iso(_utc_now())
@@ -357,6 +360,7 @@ def observe_cycle(
     run_cycle_fn: Callable[..., CycleRecord | PendingRunResult] | None = None,
     reference: Any = None,
     require_settled_broker: bool = True,
+    live: bool = False,
     events_path: str | Path | None = None,
     heartbeat_path: str | Path | None = None,
     webhook_url: str | None = None,
@@ -377,4 +381,5 @@ def observe_cycle(
     return obs.observe(
         fund, as_of, broker, data_client, universe, run_cycle_fn=run_cycle_fn,
         reference=reference, require_settled_broker=require_settled_broker,
+        live=live,
     )

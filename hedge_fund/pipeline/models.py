@@ -89,6 +89,23 @@ class PendingRunResult(BaseModel):
     scheduled_execution_date: str | None = None
 
 
+class ExecutionSlippage(BaseModel):
+    """One fill measured against the price the order was sized on.
+
+    Signed so the sign always means the same thing: positive is worse for the
+    fund — it paid more to buy, or received less to sell. A backtest reports
+    zero here by construction, which is exactly the cost a backtest cannot see.
+    """
+
+    ticker: str
+    side: Literal["buy", "sell"]
+    quantity: int
+    reference_price: float              # the mark the fund sized against
+    fill_price: float                   # what the venue charged
+    per_share: float                    # signed: + is worse
+    notional: float                     # per_share * quantity
+
+
 class CycleRecord(BaseModel):
     """One tick of the fund, fully serialized — every stage's inputs and
     outputs. `model_dump_json()` round-trips; nothing about a decision
@@ -117,7 +134,15 @@ class CycleRecord(BaseModel):
     original_assessment: DecisionRecord | None = None
     refreshed_assessment: DecisionRecord | None = None
     execution_as_of: str | None = None
-    execution_policy: Literal["next_close"] | None = None
+    # next_close: the backtest/paper path, priced and settled in one session
+    # that has already ended. live_now: priced from the newest completed close
+    # and sent to the venue immediately, which is the only way to trade during
+    # a session.
+    execution_policy: Literal["next_close", "live_now"] | None = None
+    # What the venue actually charged against the price the fund sized on.
+    # Zero for the in-process books; non-zero whenever a real venue is involved,
+    # because the market moves between the assessment and the submission.
+    slippage: list[ExecutionSlippage] = Field(default_factory=list)
     # What the broker held versus what the last receipt claimed, as of this
     # execution. None when no reference was supplied.
     reconciliation: "ReconciliationReport | None" = None

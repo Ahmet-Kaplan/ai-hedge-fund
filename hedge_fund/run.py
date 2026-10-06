@@ -293,13 +293,19 @@ def main() -> None:
     # whole loop has filled, so without this a crash mid-execution would lose
     # the fills that already happened at the venue. `session` here is the
     # run's as-of date — the executed session lands in the receipt.
+    # A real venue is priced from its newest completed close and traded *now*:
+    # the next completed session is always in the future, so the backtest's
+    # next-close rule would refuse to trade during every session. The in-process
+    # books keep next-close, which is what "fill at the mark" already means.
+    live = args.broker == "alpaca"
+
     journal = FileOrderJournal(journal_path(spec.name))
     broker = JournalledBroker(venue.broker, journal, fund=spec.name, session=args.date)
 
     with open_data_client() as fd:
         n_models = sum(len(staff) for _, staff in fund.strategies)
         with console.status(
-            f"[cyan]{spec.name}: paper cycle as of {args.date} — "
+            f"[cyan]{spec.name}: {'live' if live else 'paper'} cycle as of {args.date} — "
             f"{len(universe)} tickers x {n_models} models "
             f"across {len(fund.strategies)} strategies…",
             spinner="dots",
@@ -313,7 +319,7 @@ def main() -> None:
             # working are visible before we trade on top of it.
             record = observe_cycle(
                 fund, args.date, broker, fd, universe, observer=observer,
-                reference=venue.reference,
+                reference=venue.reference, live=live,
             )
 
     receipt = save_cycle_record(record, receipts)
@@ -352,6 +358,18 @@ def main() -> None:
             "[dim]dropped: "
             + ", ".join(f"{d.model}@{d.ticker} ({d.reason})" for d in record.dropped)
             + "[/]"
+        )
+    if record.slippage:
+        # The cost a backtest cannot see: what the venue charged against the
+        # close the fund sized on. Called out even when it is small, because
+        # the whole point of pricing live is to stop hiding it.
+        total = sum(s.notional for s in record.slippage)
+        worst = max(record.slippage, key=lambda s: abs(s.notional))
+        tone = "yellow" if abs(total) > 0 else "dim"
+        console.print(
+            f"[{tone}]slippage vs the pricing close: ${total:+,.2f} over "
+            f"{len(record.slippage)} fills · worst {worst.ticker} "
+            f"${worst.notional:+,.2f} ({worst.per_share:+.4f}/share)[/]"
         )
     console.print(f"[dim]saved {receipt}[/]")
     counts = journal_summary(journal.entries())["by_event"]
