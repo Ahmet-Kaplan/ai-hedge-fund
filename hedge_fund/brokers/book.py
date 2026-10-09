@@ -136,7 +136,7 @@ class PositionBook:
             realized = self._realize(old, abs(old), basis, price)
             basis = price
 
-        commission = self._commission.charge(quantity)
+        commission = self._commission.charge(quantity, price)
         self._cash += -signed * price - commission
         if realized is not None:
             self._realized += realized

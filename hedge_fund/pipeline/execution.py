@@ -54,12 +54,18 @@ def build_orders(
     positions: dict[str, Position],
     marks: dict[str, float],
     equity: float,
+    min_trade_pct: float = 0.0,
 ) -> list[Order]:
     """Diff the target book against the broker's current book.
 
     Sizing: target_shares = int(weight * equity / mark) — floor toward zero,
     never overshoot the target; sub-share dust stays in cash and is
     re-evaluated next cycle. Orders below one share are not emitted.
+
+    `min_trade_pct` skips a trade worth less than that fraction of equity, but
+    **only when it would grow a position**. Shrinking trades always go out: a
+    cost control must never be a reason to hold risk you meant to shed, and a
+    small trim is exactly what a cap or a drawdown brake asks for.
 
     Ordering: all sells first, then buys, alphabetical within each group —
     deterministic, and sells free the cash that buys consume within the
@@ -78,6 +84,9 @@ def build_orders(
         delta = target_shares - current_shares
         if delta == 0:
             continue
+        if min_trade_pct > 0 and abs(target_shares) > abs(current_shares):
+            if abs(delta) * mark < min_trade_pct * equity:
+                continue
         order = Order(
             ticker=ticker,
             side="buy" if delta > 0 else "sell",

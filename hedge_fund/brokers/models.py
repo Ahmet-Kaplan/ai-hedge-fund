@@ -13,20 +13,38 @@ from pydantic import BaseModel, Field
 
 
 class Commission(BaseModel):
-    """What a fill costs to execute: a per-ticket charge plus a per-share rate.
+    """What a fill costs to execute: per ticket, per share, and cross the spread.
 
-    The two shapes real schedules combine. Both default to zero, so a broker
-    nobody configured prices exactly as it did before commissions existed and
-    an existing backtest replays to the same book, to the cent.
+    The three shapes real schedules combine. All default to zero, so a broker
+    nobody configured prices exactly as it did before costs existed and an
+    existing backtest replays to the same book, to the cent.
 
-    Ported from PR #19, which had this right.
+    `spread_bps` is the **half-spread**: the difference between the midpoint and
+    the price you actually get, as basis points of notional, paid on every fill.
+    It is one side of the quoted spread, because a market order crosses once.
+    It is charged as cash rather than folded into the fill price so that, like
+    commission, it stays separable from what the position earned.
+
+    **Not modelled: market impact.** A real order moves the price against
+    itself, roughly as the square root of the fraction of average daily volume
+    it represents. At this book's size — tens of thousands of dollars in names
+    trading hundreds of millions a day — that is negligible, which is a
+    property of the strategy, not an assumption worth forgetting. A strategy
+    that needed to trade small caps, or to trade a large book, would have to
+    model it or mislead itself.
+
+    Ported from PR #19, which had the first two right; the half-spread is this
+    session's addition, because a backtest that cannot see any execution cost
+    produces a number a live run cannot reproduce.
     """
 
     per_trade: float = Field(default=0.0, ge=0.0)
     per_share: float = Field(default=0.0, ge=0.0)
+    spread_bps: float = Field(default=0.0, ge=0.0)
 
-    def charge(self, quantity: int) -> float:
-        return self.per_trade + self.per_share * quantity
+    def charge(self, quantity: int, price: float = 0.0) -> float:
+        notional = abs(quantity * price)
+        return self.per_trade + self.per_share * quantity + self.spread_bps / 10_000 * notional
 
 
 class Position(BaseModel):

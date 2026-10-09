@@ -129,6 +129,15 @@ class FundSpec(BaseModel):
     )
     risk: RiskLimits
     capital: float = Field(default=100_000.0, gt=0)
+    min_trade_pct: float = Field(
+        default=0.0,
+        ge=0.0,
+        lt=1.0,
+        description="skip trades smaller than this fraction of equity, as long "
+        "as they would grow a position rather than shrink it. Zero trades "
+        "everything. Costs are dominated by ticket count at this book's size, "
+        "so this is the cheapest cost lever there is.",
+    )
     commission: Commission = Field(
         default_factory=Commission,
         description="what a fill costs to execute: a per-ticket charge plus a "

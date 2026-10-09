@@ -262,3 +262,49 @@ def test_idempotency_still_holds_with_costs(tmp_path):
     assert second == first
     assert broker.cash() == cash_after
     assert broker.positions()["AAPL"].shares == 1
+
+
+# ---------------------------------------------------------------------------
+# Half-spread
+# ---------------------------------------------------------------------------
+
+def test_the_half_spread_is_charged_on_notional():
+    """One side of the quoted spread, because a market order crosses once."""
+    book = PositionBook(cash=10_000.0, commission=Commission(spread_bps=10.0))
+
+    movement = book.apply("AAPL", "buy", 10, 100.0)     # $1,000 notional
+
+    assert movement.commission == pytest.approx(1.0)     # 10bps of 1,000
+    assert book.cash == pytest.approx(10_000.0 - 1_000.0 - 1.0)
+    assert book.positions()["AAPL"].cost_basis == pytest.approx(100.0)  # not basis
+
+
+def test_the_spread_is_charged_on_the_sell_side_too():
+    book = PositionBook(cash=10_000.0, commission=Commission(spread_bps=10.0))
+    book.apply("AAPL", "buy", 10, 100.0)
+    before = book.cash
+
+    book.apply("AAPL", "sell", 10, 100.0)
+
+    assert book.cash - before == pytest.approx(1_000.0 - 1.0)
+
+
+def test_all_three_cost_shapes_add_up():
+    book = PositionBook(cash=10_000.0,
+                        commission=Commission(per_trade=1.0, per_share=0.01, spread_bps=5.0))
+
+    movement = book.apply("AAPL", "buy", 100, 200.0)     # $20,000 notional
+
+    assert movement.commission == pytest.approx(1.0 + 1.0 + 10.0)
+
+
+def test_a_zero_spread_book_is_unchanged():
+    """The reason costs could be added at all without invalidating old runs."""
+    plain = PositionBook(cash=10_000.0)
+    explicit = PositionBook(cash=10_000.0, commission=Commission(spread_bps=0.0))
+
+    for book in (plain, explicit):
+        book.apply("AAPL", "buy", 7, 101.37)
+        book.apply("MSFT", "sell", 3, 250.11)
+
+    assert plain.cash == explicit.cash

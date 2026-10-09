@@ -253,7 +253,8 @@ def execute_decision(
     # Deterministic per-order ids so a retry after an ambiguous failure (a
     # crash, a timeout with the venue) cannot place the same order twice.
     orders = stamp_client_order_ids(
-        spec.name, session, build_orders(targets, held, marks, equity_before),
+        spec.name, session,
+        build_orders(targets, held, marks, equity_before, min_trade_pct=spec.min_trade_pct),
     )
     projected = {t: p.shares for t, p in held.items()}
     for order in orders:

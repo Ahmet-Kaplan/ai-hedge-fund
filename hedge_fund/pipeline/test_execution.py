@@ -106,3 +106,63 @@ def test_ids_are_unique_within_a_session():
     ]
     ids = [o.client_order_id for o in stamp_client_order_ids("d", "2025-01-10", orders)]
     assert len(set(ids)) == 3
+
+
+# ---------------------------------------------------------------------------
+# Turnover control
+# ---------------------------------------------------------------------------
+
+def _diff(targets, held, marks, equity, **kwargs):
+    """Named apart from the module's existing `_orders` helper."""
+    return build_orders(targets, held, marks, equity, **kwargs)
+
+
+def test_a_dust_trade_that_grows_a_position_is_skipped():
+    """Ticket count is what costs money at this size, so the cheapest lever is
+    not making the trade at all."""
+    held = {"AAPL": Position(ticker="AAPL", shares=100)}
+    orders = _diff({"AAPL": 0.101}, held, {"AAPL": 100.0}, 100_000.0,
+                     min_trade_pct=0.005)
+
+    assert orders == []          # 1 share, $100, 0.1% of equity — below the bar
+
+
+def test_a_shrinking_trade_is_never_skipped():
+    """A cost control must not be a reason to hold risk you meant to shed — and
+    a small trim is exactly what a cap or a drawdown brake asks for."""
+    held = {"AAPL": Position(ticker="AAPL", shares=100)}
+    orders = _diff({"AAPL": 0.099}, held, {"AAPL": 100.0}, 100_000.0,
+                     min_trade_pct=0.05)
+
+    assert len(orders) == 1 and orders[0].side == "sell" and orders[0].quantity == 1
+
+
+def test_the_bar_compares_notional_to_equity():
+    """The same $10,000 trade clears the bar on a small book and not on a large
+    one — which is the point: it is a fraction of capital, not of the position.
+    """
+    marks = {"AAPL": 100.0}
+
+    # 100 shares = $10,000 = 10% of a $100k book
+    assert _diff({"AAPL": 0.10}, {}, marks, 100_000.0, min_trade_pct=0.05)
+    # the same $10,000 is 1% of a $1M book
+    assert _diff({"AAPL": 0.01}, {}, marks, 1_000_000.0, min_trade_pct=0.05) == []
+
+
+def test_zero_is_the_default_and_trades_everything():
+    held = {"AAPL": Position(ticker="AAPL", shares=100)}
+
+    assert _diff({"AAPL": 0.101}, held, {"AAPL": 100.0}, 100_000.0)
+
+
+def test_the_bar_round_trips_through_the_mandate():
+    from hedge_fund.fund.spec import FundSpec
+
+    spec = FundSpec(
+        schema_version=2, name="t",
+        strategies=[{"name": "s", "models": [{"name": "pead"}], "blend": {"mode": "long_short"}}],
+        risk={"max_position_pct": 1.0, "max_gross_exposure": 1.0},
+        min_trade_pct=0.004,
+    )
+
+    assert FundSpec.model_validate_json(spec.model_dump_json()).min_trade_pct == 0.004

@@ -132,7 +132,7 @@ def test_refresh_failure_does_not_fall_back_to_original_targets():
 def test_invalid_projected_orders_fail_before_submission(monkeypatch):
     from importlib import import_module
     pipeline = import_module("hedge_fund.pipeline.run_cycle")
-    monkeypatch.setattr(pipeline, "build_orders", lambda *args: [
+    monkeypatch.setattr(pipeline, "build_orders", lambda *args, **kwargs: [
         Order(ticker="A", side="buy", quantity=1000, price=200),
     ])
     fund, _ = make_fund()
