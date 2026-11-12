@@ -1,4 +1,9 @@
-"""Daily crypto bars from Alpaca's market data API — free, no key needed.
+"""Daily crypto bars from Alpaca's market data API — free.
+
+No key is required, but keyless calls share a rate limit per IP address, and
+GitHub's runners share IPs with everyone else, so they 429 often. When the
+APCA_API_KEY_ID / APCA_API_SECRET_KEY data keys are set they are sent (the
+limit is then per account), and a 429 or 5xx is retried with backoff.
 
 BTC, ETH and SOL go back to 2021-01-01. Bars are UTC days. Pairs use
 Alpaca's order/data form (`BTC/USD`); positions come back as `BTCUSD`, and
@@ -8,7 +13,10 @@ Alpaca's order/data form (`BTC/USD`); positions come back as `BTCUSD`, and
 
 from __future__ import annotations
 
+import os
+import time
 from datetime import date, timedelta
+from typing import Callable
 
 import requests
 
@@ -18,6 +26,7 @@ from hedge_fund.data.store import MarketStore
 
 CRYPTO_BARS_URL = "https://data.alpaca.markets/v1beta3/crypto/us/bars"
 CRYPTO_QUOTES_URL = "https://data.alpaca.markets/v1beta3/crypto/us/latest/quotes"
+_RETRY_DELAYS = (2.0, 5.0, 15.0, 30.0)   # seconds before each retry of a 429/5xx/network error
 
 
 def pair(symbol: str) -> str:
@@ -31,9 +40,36 @@ def pair(symbol: str) -> str:
 
 
 class CryptoPriceSource:
-    def __init__(self, *, timeout: float = 30.0, session: requests.Session | None = None) -> None:
+    def __init__(self, *, timeout: float = 30.0, session: requests.Session | None = None,
+                 key_id: str | None = None, secret_key: str | None = None,
+                 sleep: Callable[[float], None] = time.sleep) -> None:
         self._timeout = timeout
         self._session = session or requests.Session()
+        self._sleep = sleep
+        key_id = os.environ.get("APCA_API_KEY_ID", "") if key_id is None else key_id
+        secret_key = os.environ.get("APCA_API_SECRET_KEY", "") if secret_key is None else secret_key
+        if key_id and secret_key:
+            self._session.headers.update({"APCA-API-KEY-ID": key_id, "APCA-API-SECRET-KEY": secret_key})
+
+    def _get(self, url: str, params: dict, what: str) -> dict:
+        """GET with retries on 429, 5xx and network errors; Retry-After wins when Alpaca sends one."""
+        for delay in (*_RETRY_DELAYS, None):
+            try:
+                resp = self._session.get(url, params=dict(params), timeout=self._timeout)
+            except requests.RequestException as exc:
+                if delay is None:
+                    raise DataSourceError(f"Alpaca {what}: {exc}") from exc
+                self._sleep(delay)
+                continue
+            if resp.status_code == 429 or resp.status_code >= 500:
+                if delay is not None:
+                    self._sleep(_retry_after(resp, delay))
+                    continue
+            if resp.status_code >= 400:
+                raise DataSourceError(f"Alpaca {what}: HTTP {resp.status_code}: {resp.text[:200]}",
+                                      status_code=resp.status_code)
+            return resp.json()
+        raise AssertionError("unreachable")
 
     def fetch(self, symbols: list[str], start: str, end: str) -> dict[str, list[Price]]:
         """Daily bars in [start, end] (UTC days) per pair, oldest first."""
@@ -41,13 +77,7 @@ class CryptoPriceSource:
                   "end": f"{end}T23:59:59Z", "limit": 10000, "sort": "asc"}
         out: dict[str, list[Price]] = {}
         while True:
-            try:
-                resp = self._session.get(CRYPTO_BARS_URL, params=dict(params), timeout=self._timeout)
-            except requests.RequestException as exc:
-                raise DataSourceError(f"Alpaca crypto bars: {exc}") from exc
-            if resp.status_code >= 400:
-                raise DataSourceError(f"Alpaca crypto bars: HTTP {resp.status_code}: {resp.text[:200]}")
-            data = resp.json()
+            data = self._get(CRYPTO_BARS_URL, params, "crypto bars")
             for symbol, rows in (data.get("bars") or {}).items():
                 out.setdefault(symbol, []).extend(
                     Price(open=r["o"], high=r["h"], low=r["l"], close=r["c"], volume=int(r.get("v") or 0), time=r["t"])
@@ -60,18 +90,19 @@ class CryptoPriceSource:
 
     def latest_quotes(self, symbols: list[str]) -> dict[str, tuple[float, float]]:
         """(best bid, best ask) per pair, right now."""
-        try:
-            resp = self._session.get(CRYPTO_QUOTES_URL, params={"symbols": ",".join(symbols)}, timeout=self._timeout)
-        except requests.RequestException as exc:
-            raise DataSourceError(f"Alpaca crypto quotes: {exc}") from exc
-        if resp.status_code >= 400:
-            raise DataSourceError(f"Alpaca crypto quotes: HTTP {resp.status_code}: {resp.text[:200]}")
-        rows = resp.json().get("quotes") or {}
+        rows = self._get(CRYPTO_QUOTES_URL, {"symbols": ",".join(symbols)}, "crypto quotes").get("quotes") or {}
         out = {s: (float(rows[s]["bp"]), float(rows[s]["ap"])) for s in symbols if s in rows}
         bad = [s for s in symbols if s not in out or not 0 < out[s][0] < out[s][1]]
         if bad:
             raise DataSourceError(f"Alpaca crypto quotes: no usable bid/ask for {', '.join(bad)}")
         return out
+
+
+def _retry_after(resp, default: float) -> float:
+    try:
+        return min(max(float((getattr(resp, "headers", None) or {}).get("Retry-After")), default), 60.0)
+    except (TypeError, ValueError):
+        return default
 
 
 def crypto_closes(store: MarketStore, source: CryptoPriceSource, symbols: list[str],

@@ -8,8 +8,9 @@ from hedge_fund.data.store import MarketStore
 
 
 class FakeResponse:
-    def __init__(self, payload, status=200):
+    def __init__(self, payload, status=200, headers=None):
         self._payload, self.status_code, self.text = payload, status, str(payload)
+        self.headers = headers or {}
 
     def json(self):
         return self._payload
@@ -49,7 +50,40 @@ def test_fetch_follows_pages():
 
 def test_http_error_raises():
     with pytest.raises(DataSourceError):
-        CryptoPriceSource(session=FakeSession(FakeResponse({"message": "no"}, 500))).fetch(["BTC/USD"], "2021-01-01", "2021-01-02")
+        CryptoPriceSource(session=FakeSession(FakeResponse({"message": "no"}, 400))).fetch(["BTC/USD"], "2021-01-01", "2021-01-02")
+
+
+def test_429_is_retried_then_succeeds():
+    sleeps = []
+    session = FakeSession(FakeResponse({"message": "too many requests."}, 429, {"Retry-After": "7"}),
+                          FakeResponse({"message": "busy"}, 503),
+                          FakeResponse({"bars": {"BTC/USD": [bar("2021-01-01", 29000.0)]}}))
+    out = CryptoPriceSource(session=session, sleep=sleeps.append).fetch(["BTC/USD"], "2021-01-01", "2021-01-01")
+    assert [p.close for p in out["BTC/USD"]] == [29000.0]
+    assert sleeps == [7.0, 5.0]   # Retry-After honoured, then the normal backoff
+
+
+def test_429_gives_up_after_the_retries():
+    session = FakeSession(*[FakeResponse({"message": "too many requests."}, 429)] * 5)
+    with pytest.raises(DataSourceError) as exc_info:
+        CryptoPriceSource(session=session, sleep=lambda s: None).fetch(["BTC/USD"], "2021-01-01", "2021-01-01")
+    assert exc_info.value.status_code == 429 and len(session.calls) == 5
+
+
+def test_sends_data_keys_from_the_environment(monkeypatch):
+    monkeypatch.setenv("APCA_API_KEY_ID", "kid")
+    monkeypatch.setenv("APCA_API_SECRET_KEY", "sec")
+    session = FakeSession()
+    CryptoPriceSource(session=session)
+    assert session.headers == {"APCA-API-KEY-ID": "kid", "APCA-API-SECRET-KEY": "sec"}
+
+
+def test_works_without_keys(monkeypatch):
+    monkeypatch.delenv("APCA_API_KEY_ID", raising=False)
+    monkeypatch.delenv("APCA_API_SECRET_KEY", raising=False)
+    session = FakeSession()
+    CryptoPriceSource(session=session)
+    assert session.headers == {}
 
 
 def test_closes_are_cached_and_synced_incrementally(tmp_path):
